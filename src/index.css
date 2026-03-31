@@ -1,0 +1,33 @@
+:root {
+  color-scheme: dark;
+  font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
+  background: #020304;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background:
+    radial-gradient(circle at 18% 10%, rgba(30, 36, 45, 0.54), transparent 24%),
+    radial-gradient(circle at 82% 14%, rgba(16, 20, 27, 0.56), transparent 24%),
+    radial-gradient(circle at 32% 78%, rgba(22, 28, 35, 0.42), transparent 28%),
+    linear-gradient(180deg, #020304 0%, #05070a 46%, #020304 100%);
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
