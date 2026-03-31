@@ -21,290 +21,140 @@ interface GraphBranchInput {
   children?: GraphBranchInput[]
 }
 
-const graphDefinition: GraphBranchInput[] = [
-  {
-    id: 'atlas',
-    label: 'Atlas',
-    children: [
-      {
-        id: 'atlas-foundry',
-        label: 'Foundry',
-        children: [
-          { id: 'atlas-foundry-ore', label: 'Ore Lens' },
-          {
-            id: 'atlas-foundry-forge',
-            label: 'Forge Line',
-            children: [
-              {
-                id: 'atlas-foundry-forge-a',
-                label: 'Spark A',
-                children: [
-                  {
-                    id: 'atlas-foundry-forge-a-ember',
-                    label: 'Ember Trace',
-                    children: [
-                      {
-                        id: 'atlas-foundry-forge-a-ember-map',
-                        label: 'Kiln Map',
-                        children: [
-                          {
-                            id: 'atlas-foundry-forge-a-ember-map-seam',
-                            label: 'Seam Coil',
-                            children: [
-                              {
-                                id: 'atlas-foundry-forge-a-ember-map-seam-core',
-                                label: 'Core Tap',
-                              },
-                            ],
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                ],
-              },
-              {
-                id: 'atlas-foundry-forge-b',
-                label: 'Spark B',
-                children: [
-                  {
-                    id: 'atlas-foundry-forge-b-glass',
-                    label: 'Glass Thread',
-                    children: [
-                      {
-                        id: 'atlas-foundry-forge-b-glass-vault',
-                        label: 'Heat Vault',
-                      },
-                    ],
-                  },
-                ],
-              },
-            ],
-          },
-          { id: 'atlas-foundry-cooling', label: 'Cooling Bay' },
-        ],
-      },
-      {
-        id: 'atlas-harbor',
-        label: 'Harbor',
-        children: [
-          { id: 'atlas-harbor-fleet', label: 'Fleet' },
-          {
-            id: 'atlas-harbor-signals',
-            label: 'Signals',
-            children: [
-              { id: 'atlas-harbor-signals-east', label: 'East Relay' },
-              { id: 'atlas-harbor-signals-west', label: 'West Relay' },
-              { id: 'atlas-harbor-signals-north', label: 'North Relay' },
-            ],
-          },
-        ],
-      },
-      {
-        id: 'atlas-archives',
-        label: 'Archives',
-        children: [
-          { id: 'atlas-archives-ledger', label: 'Ledger' },
-          { id: 'atlas-archives-index', label: 'Index' },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'boreal',
-    label: 'Boreal',
-    children: [
-      {
-        id: 'boreal-canopy',
-        label: 'Canopy',
-        children: [
-          {
-            id: 'boreal-canopy-birds',
-            label: 'Bird Ring',
-            children: [
-              { id: 'boreal-canopy-birds-south', label: 'South Wing' },
-              { id: 'boreal-canopy-birds-west', label: 'West Wing' },
-            ],
-          },
-          { id: 'boreal-canopy-light', label: 'Light Well' },
-        ],
-      },
-      {
-        id: 'boreal-understory',
-        label: 'Understory',
-        children: [
-          { id: 'boreal-understory-moss', label: 'Moss Field' },
-          {
-            id: 'boreal-understory-stream',
-            label: 'Cold Stream',
-            children: [
-              { id: 'boreal-understory-stream-stones', label: 'Stone Bed' },
-              { id: 'boreal-understory-stream-fish', label: 'Silver Fish' },
-              {
-                id: 'boreal-understory-stream-fog',
-                label: 'Fog Pocket',
-                children: [
-                  {
-                    id: 'boreal-understory-stream-fog-reed',
-                    label: 'Reed Line',
-                    children: [
-                      {
-                        id: 'boreal-understory-stream-fog-reed-hollow',
-                        label: 'Hollow Reed',
-                        children: [
-                          {
-                            id: 'boreal-understory-stream-fog-reed-hollow-drift',
-                            label: 'Drift Nest',
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                ],
-              },
-            ],
-          },
-          { id: 'boreal-understory-ferns', label: 'Ferns' },
-        ],
-      },
-      { id: 'boreal-roots', label: 'Root Vault' },
-    ],
-  },
-  {
-    id: 'meridian',
-    label: 'Meridian',
-    children: [
-      {
-        id: 'meridian-east',
-        label: 'East Quarter',
-        children: [
-          { id: 'meridian-east-market', label: 'Market' },
-          { id: 'meridian-east-plaza', label: 'Plaza' },
-          {
-            id: 'meridian-east-docks',
-            label: 'Dock Loop',
-            children: [
-              { id: 'meridian-east-docks-a', label: 'Pier A' },
-              { id: 'meridian-east-docks-b', label: 'Pier B' },
-              { id: 'meridian-east-docks-c', label: 'Pier C' },
-            ],
-          },
-        ],
-      },
-      {
-        id: 'meridian-west',
-        label: 'West Quarter',
-        children: [
-          { id: 'meridian-west-garden', label: 'Garden' },
-          {
-            id: 'meridian-west-hall',
-            label: 'Hall',
-            children: [
-              {
-                id: 'meridian-west-hall-amber',
-                label: 'Amber Wing',
-                children: [
-                  {
-                    id: 'meridian-west-hall-amber-archive',
-                    label: 'Amber Archive',
-                    children: [
-                      {
-                        id: 'meridian-west-hall-amber-archive-lower',
-                        label: 'Lower Stack',
-                        children: [
-                          {
-                            id: 'meridian-west-hall-amber-archive-lower-seal',
-                            label: 'Seal Room',
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                ],
-              },
-              { id: 'meridian-west-hall-cinder', label: 'Cinder Wing' },
-            ],
-          },
-        ],
-      },
-      { id: 'meridian-core', label: 'Core' },
-      { id: 'meridian-gates', label: 'Gates' },
-    ],
-  },
-  {
-    id: 'solstice',
-    label: 'Solstice',
-    children: [
-      {
-        id: 'solstice-dawn',
-        label: 'Dawn Deck',
-        children: [
-          { id: 'solstice-dawn-choir', label: 'Choir' },
-          { id: 'solstice-dawn-beacons', label: 'Beacons' },
-        ],
-      },
-      {
-        id: 'solstice-noon',
-        label: 'Noon Array',
-        children: [
-          {
-            id: 'solstice-noon-prisms',
-            label: 'Prisms',
-            children: [
-              { id: 'solstice-noon-prisms-red', label: 'Red Prism' },
-              { id: 'solstice-noon-prisms-gold', label: 'Gold Prism' },
-              { id: 'solstice-noon-prisms-teal', label: 'Teal Prism' },
-            ],
-          },
-          { id: 'solstice-noon-mirror', label: 'Mirror Run' },
-          { id: 'solstice-noon-lens', label: 'Lens Rack' },
-        ],
-      },
-      {
-        id: 'solstice-dusk',
-        label: 'Dusk Ramp',
-        children: [
-          { id: 'solstice-dusk-lanterns', label: 'Lanterns' },
-          {
-            id: 'solstice-dusk-watch',
-            label: 'Watch',
-            children: [
-              {
-                id: 'solstice-dusk-watch-inner',
-                label: 'Inner Watch',
-                children: [
-                  {
-                    id: 'solstice-dusk-watch-inner-stair',
-                    label: 'Stairwell',
-                    children: [
-                      {
-                        id: 'solstice-dusk-watch-inner-stair-bell',
-                        label: 'Bell Deck',
-                        children: [
-                          {
-                            id: 'solstice-dusk-watch-inner-stair-bell-vigil',
-                            label: 'Vigil Post',
-                            children: [
-                              {
-                                id: 'solstice-dusk-watch-inner-stair-bell-vigil-star',
-                                label: 'Star Latch',
-                              },
-                            ],
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                ],
-              },
-              { id: 'solstice-dusk-watch-outer', label: 'Outer Watch' },
-            ],
-          },
-        ],
-      },
-    ],
-  },
+interface MutableBranch {
+  id: string
+  label: string
+  rootIndex: number
+  children: MutableBranch[]
+}
+
+export const DEFAULT_EXAMPLE_NODE_COUNT = 77
+export const MIN_EXAMPLE_NODE_COUNT = 12
+export const MAX_EXAMPLE_NODE_COUNT = 240
+export const DEFAULT_EXAMPLE_ROOT_COUNT = 4
+export const MIN_EXAMPLE_ROOT_COUNT = 2
+export const MAX_EXAMPLE_ROOT_COUNT = 8
+export const DEFAULT_EXAMPLE_DEPTH = 5
+export const MIN_EXAMPLE_DEPTH = 2
+export const MAX_EXAMPLE_DEPTH = 8
+export const DEFAULT_CHILD_MIN_COUNT = 1
+export const DEFAULT_CHILD_MAX_COUNT = 3
+export const MIN_CHILD_COUNT = 0
+export const MAX_CHILD_COUNT = 8
+
+const ROOT_LABELS = [
+  'Atlas',
+  'Boreal',
+  'Meridian',
+  'Solstice',
+  'Aster',
+  'Cinder',
 ]
+
+const LABEL_PREFIXES = [
+  'Amber',
+  'Beacon',
+  'Cinder',
+  'Delta',
+  'Echo',
+  'Forge',
+  'Grove',
+  'Harbor',
+  'Ivory',
+  'Jade',
+  'Keystone',
+  'Lumen',
+  'Morrow',
+  'North',
+  'Onyx',
+  'Prairie',
+  'Quartz',
+  'Ridge',
+  'Signal',
+  'Tidal',
+]
+
+const LABEL_SUFFIXES = [
+  'Array',
+  'Archive',
+  'Atrium',
+  'Branch',
+  'Circuit',
+  'Cluster',
+  'Field',
+  'Gate',
+  'Hall',
+  'Harbor',
+  'Line',
+  'Loop',
+  'Node',
+  'Path',
+  'Ring',
+  'Spire',
+  'Vault',
+  'Watch',
+  'Wing',
+  'Yard',
+]
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function normalizeRootCount(targetRootCount: number) {
+  return clamp(Math.round(targetRootCount), MIN_EXAMPLE_ROOT_COUNT, MAX_EXAMPLE_ROOT_COUNT)
+}
+
+function normalizeDepth(targetDepth: number) {
+  return clamp(Math.round(targetDepth), MIN_EXAMPLE_DEPTH, MAX_EXAMPLE_DEPTH)
+}
+
+function normalizeChildCount(targetCount: number) {
+  return clamp(Math.round(targetCount), MIN_CHILD_COUNT, MAX_CHILD_COUNT)
+}
+
+function createSeededRandom(seed: number) {
+  let state = seed >>> 0 || 1
+
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0
+    return state / 0x100000000
+  }
+}
+
+function slugify(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+}
+
+function createLabel(index: number, depth: number, rootIndex: number) {
+  const prefix = LABEL_PREFIXES[(index + rootIndex * 3 + depth) % LABEL_PREFIXES.length]
+  const suffix =
+    LABEL_SUFFIXES[
+      (Math.floor(index / LABEL_PREFIXES.length) + rootIndex * 5 + depth * 2) %
+        LABEL_SUFFIXES.length
+    ]
+
+  return `${prefix} ${suffix}`
+}
+
+function createRootBranch(index: number): MutableBranch {
+  const label = ROOT_LABELS[index] ?? `Root ${index + 1}`
+
+  return {
+    id: slugify(label),
+    label,
+    rootIndex: index,
+    children: [],
+  }
+}
+
+function toBranchInput(branch: MutableBranch): GraphBranchInput {
+  return {
+    id: branch.id,
+    label: branch.label,
+    children: branch.children.map(toBranchInput),
+  }
+}
 
 function buildDataset(definition: GraphBranchInput[]): GraphDataset {
   const nodes: Record<string, GraphNodeRecord> = {}
@@ -349,4 +199,89 @@ function buildDataset(definition: GraphBranchInput[]): GraphDataset {
   }
 }
 
-export const exampleGraph = buildDataset(graphDefinition)
+interface ExampleGraphOptions {
+  rootCount?: number
+  depth?: number
+  childMinCount?: number
+  childMaxCount?: number
+}
+
+export function createExampleGraph(
+  options: number | ExampleGraphOptions = DEFAULT_EXAMPLE_ROOT_COUNT,
+): GraphDataset {
+  const normalizedOptions =
+    typeof options === 'number'
+      ? { rootCount: options }
+      : options
+  const rootCount = normalizeRootCount(
+    normalizedOptions.rootCount ?? DEFAULT_EXAMPLE_ROOT_COUNT,
+  )
+  const maxDepth = normalizeDepth(
+    normalizedOptions.depth ?? DEFAULT_EXAMPLE_DEPTH,
+  )
+  const childMinCount = normalizeChildCount(
+    normalizedOptions.childMinCount ?? DEFAULT_CHILD_MIN_COUNT,
+  )
+  const childMaxCount = Math.max(
+    childMinCount,
+    normalizeChildCount(
+      normalizedOptions.childMaxCount ?? DEFAULT_CHILD_MAX_COUNT,
+    ),
+  )
+  const roots = Array.from({ length: rootCount }, (_, index) => createRootBranch(index))
+  const random = createSeededRandom(
+    rootCount * 2654435761 +
+      maxDepth * 40503 +
+      childMinCount * 7919 +
+      childMaxCount * 15401,
+  )
+  let nextIndex = rootCount
+  let parentLayer = roots
+
+  for (let depth = 1; depth < maxDepth; depth += 1) {
+    if (parentLayer.length === 0) {
+      break
+    }
+    const nextLayer: MutableBranch[] = []
+
+    for (const parent of parentLayer) {
+      const childCount =
+        childMinCount +
+        Math.floor(random() * (childMaxCount - childMinCount + 1))
+
+      for (let index = 0; index < childCount; index += 1) {
+        if (nextIndex >= MAX_EXAMPLE_NODE_COUNT) {
+          break
+        }
+
+        const childIndex = parent.children.length
+        const label = createLabel(nextIndex, depth, parent.rootIndex)
+        const child: MutableBranch = {
+          id: `${parent.id}-${slugify(label)}-${childIndex + 1}`,
+          label,
+          rootIndex: parent.rootIndex,
+          children: [],
+        }
+
+        parent.children.push(child)
+        nextLayer.push(child)
+        nextIndex += 1
+      }
+    }
+
+    if (nextIndex >= MAX_EXAMPLE_NODE_COUNT) {
+      break
+    }
+
+    parentLayer = nextLayer
+  }
+
+  return buildDataset(roots.map(toBranchInput))
+}
+
+export const exampleGraph = createExampleGraph({
+  rootCount: DEFAULT_EXAMPLE_ROOT_COUNT,
+  depth: DEFAULT_EXAMPLE_DEPTH,
+  childMinCount: DEFAULT_CHILD_MIN_COUNT,
+  childMaxCount: DEFAULT_CHILD_MAX_COUNT,
+})

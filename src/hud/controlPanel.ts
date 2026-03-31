@@ -11,7 +11,19 @@ import {
   GraphLayoutEngine,
   type LayoutSnapshot,
 } from '../engine/layoutEngine'
-import { GraphStore, getDepthControlMax } from '../store/graphStore'
+import {
+  DEFAULT_CHILD_MAX_COUNT,
+  DEFAULT_CHILD_MIN_COUNT,
+  DEFAULT_EXAMPLE_DEPTH,
+  DEFAULT_EXAMPLE_ROOT_COUNT,
+  MAX_EXAMPLE_DEPTH,
+  MAX_EXAMPLE_ROOT_COUNT,
+  MAX_CHILD_COUNT,
+  MIN_EXAMPLE_DEPTH,
+  MIN_EXAMPLE_ROOT_COUNT,
+  MIN_CHILD_COUNT,
+} from '../data/exampleGraph'
+import { GraphStore } from '../store/graphStore'
 
 const PANEL_X = 20
 const PANEL_Y = 20
@@ -200,8 +212,8 @@ class HudSlider {
   private readonly track = new Graphics()
   private readonly fill = new Graphics()
   private readonly handle = new Graphics()
-  private readonly min: number
-  private readonly max: number
+  private min: number
+  private max: number
   private readonly step: number
   private readonly formatValue: (value: number) => string
   private readonly onChange: (value: number) => void
@@ -271,6 +283,13 @@ class HudSlider {
 
   setValue(nextValue: number) {
     this.value = clamp(nextValue, this.min, this.max)
+    this.redraw()
+  }
+
+  setRange(min: number, max: number) {
+    this.min = min
+    this.max = max
+    this.value = clamp(this.value, this.min, this.max)
     this.redraw()
   }
 
@@ -378,123 +397,77 @@ export class ControlPanel {
   private readonly background = new Graphics()
   private readonly statsLeft: StatCard
   private readonly statsRight: StatCard
+  private readonly rootCountSlider: HudSlider
   private readonly depthSlider: HudSlider
-  private readonly siblingGapSlider: HudSlider
-  private readonly branchPaddingSlider: HudSlider
-  private readonly rootGapSlider: HudSlider
-  private readonly subtreeScaleSlider: HudSlider
-  private readonly minLengthSlider: HudSlider
-  private readonly parentFactorSlider: HudSlider
-  private readonly childFactorSlider: HudSlider
-  private readonly nodeBaseSlider: HudSlider
+  private readonly childMinSlider: HudSlider
+  private readonly childMaxSlider: HudSlider
   private readonly unsubscribers: Array<() => void> = []
   private panelHeight = 0
   private panelScale = 1
 
-  constructor(store: GraphStore, layoutEngine: GraphLayoutEngine) {
-    const edgeSettings = layoutEngine.getEdgeSettings()
-    const edgeBounds = layoutEngine.getEdgeSettingBounds()
-    const layoutSettings = layoutEngine.getLayoutSettings()
-    const layoutBounds = layoutEngine.getLayoutSettingBounds()
-    const storeSnapshot = store.getSnapshot()
-
-    const title = createHudText('Control Gizmo', titleStyle)
+  constructor(
+    store: GraphStore,
+    layoutEngine: GraphLayoutEngine,
+    onRootCountChange?: (rootCount: number) => void,
+    onDepthChange?: (depth: number) => void,
+    onChildMinChange?: (childMin: number) => void,
+    onChildMaxChange?: (childMax: number) => void,
+  ) {
+    const title = createHudText('Gizmo', titleStyle)
     const subtitle = createHudText(
-      'Tune the live forest layout in-place.',
+      'Graph controls. Changes to these settings will reset the graph.',
       subtitleStyle,
     )
     const actionsLabel = new SectionLabel('Actions')
     const graphLabel = new SectionLabel('Graph')
-    const visibilityLabel = new SectionLabel('Visibility')
-    const spacingLabel = new SectionLabel('Spacing')
-    const edgeLabel = new SectionLabel('Edge Length')
     const expandAll = new HudButton('Expand All', () => store.expandAll())
     const collapseAll = new HudButton('Collapse All', () => store.collapseAll())
     const fitView = new HudButton('Fit To Screen', () => layoutEngine.requestFitToScreen())
 
-    this.statsLeft = new StatCard('Visible Nodes', '0 / 0', (CONTENT_WIDTH - 10) / 2)
-    this.statsRight = new StatCard('Roots', `${store.graph.roots.length}`, (CONTENT_WIDTH - 10) / 2)
+    this.statsLeft = new StatCard('Visible Nodes', '0', (CONTENT_WIDTH - 10) / 2)
+    this.statsRight = new StatCard('Total Nodes', `${store.graph.totalNodes}`, (CONTENT_WIDTH - 10) / 2)
 
-    this.depthSlider = new HudSlider({
-      label: 'Depth',
-      value: storeSnapshot.maxDepth,
-      min: 1,
-      max: getDepthControlMax(store.graph),
+    this.rootCountSlider = new HudSlider({
+      label: 'Root Nodes',
+      value: DEFAULT_EXAMPLE_ROOT_COUNT,
+      min: MIN_EXAMPLE_ROOT_COUNT,
+      max: MAX_EXAMPLE_ROOT_COUNT,
       step: 1,
       formatValue: (value) => `${value}`,
-      onChange: (value) => store.setMaxDepth(value),
+      onChange: (value) => onRootCountChange?.(value),
     })
-    this.siblingGapSlider = new HudSlider({
-      label: 'Family Gap',
-      value: layoutSettings.siblingGap,
-      min: layoutBounds.siblingGap.min,
-      max: layoutBounds.siblingGap.max,
-      step: layoutBounds.siblingGap.step,
-      formatValue: (value) => `${Math.round(value)}`,
-      onChange: (value) => layoutEngine.updateLayoutSettings({ siblingGap: value }),
+    this.depthSlider = new HudSlider({
+      label: 'Depth',
+      value: DEFAULT_EXAMPLE_DEPTH,
+      min: MIN_EXAMPLE_DEPTH,
+      max: MAX_EXAMPLE_DEPTH,
+      step: 1,
+      formatValue: (value) => `${value}`,
+      onChange: (value) => onDepthChange?.(value),
     })
-    this.branchPaddingSlider = new HudSlider({
-      label: 'Branch Padding',
-      value: layoutSettings.branchPadding,
-      min: layoutBounds.branchPadding.min,
-      max: layoutBounds.branchPadding.max,
-      step: layoutBounds.branchPadding.step,
-      formatValue: (value) => `${Math.round(value)}`,
-      onChange: (value) => layoutEngine.updateLayoutSettings({ branchPadding: value }),
+    this.childMinSlider = new HudSlider({
+      label: 'Children Min',
+      value: DEFAULT_CHILD_MIN_COUNT,
+      min: MIN_CHILD_COUNT,
+      max: DEFAULT_CHILD_MAX_COUNT,
+      step: 1,
+      formatValue: (value) => `${value}`,
+      onChange: (value) => {
+        this.childMaxSlider.setRange(value, MAX_CHILD_COUNT)
+        onChildMinChange?.(value)
+      },
     })
-    this.rootGapSlider = new HudSlider({
-      label: 'Root Gap',
-      value: layoutSettings.rootGap,
-      min: layoutBounds.rootGap.min,
-      max: layoutBounds.rootGap.max,
-      step: layoutBounds.rootGap.step,
-      formatValue: (value) => `${Math.round(value)}`,
-      onChange: (value) => layoutEngine.updateLayoutSettings({ rootGap: value }),
-    })
-    this.subtreeScaleSlider = new HudSlider({
-      label: 'Subtree Scale',
-      value: layoutSettings.subtreeScale,
-      min: layoutBounds.subtreeScale.min,
-      max: layoutBounds.subtreeScale.max,
-      step: layoutBounds.subtreeScale.step,
-      formatValue: (value) => value.toFixed(2),
-      onChange: (value) => layoutEngine.updateLayoutSettings({ subtreeScale: value }),
-    })
-    this.minLengthSlider = new HudSlider({
-      label: 'Min Length',
-      value: edgeSettings.minLength,
-      min: edgeBounds.minLength.min,
-      max: edgeBounds.minLength.max,
-      step: edgeBounds.minLength.step,
-      formatValue: (value) => `${Math.round(value)}`,
-      onChange: (value) => layoutEngine.updateEdgeSettings({ minLength: value }),
-    })
-    this.parentFactorSlider = new HudSlider({
-      label: 'Parent Orbit',
-      value: edgeSettings.parentOrbitFactor,
-      min: edgeBounds.parentOrbitFactor.min,
-      max: edgeBounds.parentOrbitFactor.max,
-      step: edgeBounds.parentOrbitFactor.step,
-      formatValue: (value) => value.toFixed(2),
-      onChange: (value) => layoutEngine.updateEdgeSettings({ parentOrbitFactor: value }),
-    })
-    this.childFactorSlider = new HudSlider({
-      label: 'Child Footprint',
-      value: edgeSettings.childFootprintFactor,
-      min: edgeBounds.childFootprintFactor.min,
-      max: edgeBounds.childFootprintFactor.max,
-      step: edgeBounds.childFootprintFactor.step,
-      formatValue: (value) => value.toFixed(2),
-      onChange: (value) => layoutEngine.updateEdgeSettings({ childFootprintFactor: value }),
-    })
-    this.nodeBaseSlider = new HudSlider({
-      label: 'Node Bonus',
-      value: edgeSettings.nodeBaseLength,
-      min: edgeBounds.nodeBaseLength.min,
-      max: edgeBounds.nodeBaseLength.max,
-      step: edgeBounds.nodeBaseLength.step,
-      formatValue: (value) => `${Math.round(value)}`,
-      onChange: (value) => layoutEngine.updateEdgeSettings({ nodeBaseLength: value }),
+    this.childMaxSlider = new HudSlider({
+      label: 'Children Max',
+      value: DEFAULT_CHILD_MAX_COUNT,
+      min: DEFAULT_CHILD_MIN_COUNT,
+      max: MAX_CHILD_COUNT,
+      step: 1,
+      formatValue: (value) => `${value}`,
+      onChange: (value) => {
+        this.childMinSlider.setRange(MIN_CHILD_COUNT, value)
+        onChildMaxChange?.(value)
+      },
     })
 
     this.container.addChild(
@@ -508,18 +481,10 @@ export class ControlPanel {
       graphLabel.container,
       this.statsLeft.container,
       this.statsRight.container,
-      visibilityLabel.container,
+      this.rootCountSlider.container,
       this.depthSlider.container,
-      spacingLabel.container,
-      this.siblingGapSlider.container,
-      this.branchPaddingSlider.container,
-      this.rootGapSlider.container,
-      this.subtreeScaleSlider.container,
-      edgeLabel.container,
-      this.minLengthSlider.container,
-      this.parentFactorSlider.container,
-      this.childFactorSlider.container,
-      this.nodeBaseSlider.container,
+      this.childMinSlider.container,
+      this.childMaxSlider.container,
     )
 
     let cursorY = PANEL_PADDING
@@ -543,54 +508,22 @@ export class ControlPanel {
     this.statsLeft.container.position.set(PANEL_PADDING, cursorY)
     this.statsRight.container.position.set(PANEL_PADDING + (CONTENT_WIDTH - 10) / 2 + 10, cursorY)
     cursorY += 56 + SECTION_GAP
-
-    visibilityLabel.container.position.set(PANEL_PADDING, cursorY)
-    cursorY += 28
+    this.rootCountSlider.container.position.set(PANEL_PADDING, cursorY)
+    cursorY += this.rootCountSlider.height + ROW_GAP
     this.depthSlider.container.position.set(PANEL_PADDING, cursorY)
-    cursorY += this.depthSlider.height + SECTION_GAP
-
-    spacingLabel.container.position.set(PANEL_PADDING, cursorY)
-    cursorY += 28
-    this.siblingGapSlider.container.position.set(PANEL_PADDING, cursorY)
-    cursorY += this.siblingGapSlider.height + ROW_GAP
-    this.branchPaddingSlider.container.position.set(PANEL_PADDING, cursorY)
-    cursorY += this.branchPaddingSlider.height + ROW_GAP
-    this.rootGapSlider.container.position.set(PANEL_PADDING, cursorY)
-    cursorY += this.rootGapSlider.height + ROW_GAP
-    this.subtreeScaleSlider.container.position.set(PANEL_PADDING, cursorY)
-    cursorY += this.subtreeScaleSlider.height + SECTION_GAP
-
-    edgeLabel.container.position.set(PANEL_PADDING, cursorY)
-    cursorY += 28
-    this.minLengthSlider.container.position.set(PANEL_PADDING, cursorY)
-    cursorY += this.minLengthSlider.height + ROW_GAP
-    this.parentFactorSlider.container.position.set(PANEL_PADDING, cursorY)
-    cursorY += this.parentFactorSlider.height + ROW_GAP
-    this.childFactorSlider.container.position.set(PANEL_PADDING, cursorY)
-    cursorY += this.childFactorSlider.height + ROW_GAP
-    this.nodeBaseSlider.container.position.set(PANEL_PADDING, cursorY)
-    cursorY += this.nodeBaseSlider.height + PANEL_PADDING
+    cursorY += this.depthSlider.height + ROW_GAP
+    this.childMinSlider.container.position.set(PANEL_PADDING, cursorY)
+    cursorY += this.childMinSlider.height + ROW_GAP
+    this.childMaxSlider.container.position.set(PANEL_PADDING, cursorY)
+    cursorY += this.childMaxSlider.height + PANEL_PADDING
 
     this.panelHeight = cursorY
     this.redrawBackground()
 
     this.unsubscribers.push(
-      store.subscribe((snapshot) => {
-        this.depthSlider.setValue(snapshot.maxDepth)
-      }),
-    )
-    this.unsubscribers.push(
       layoutEngine.subscribe((snapshot: LayoutSnapshot) => {
-        this.statsLeft.setValue(`${snapshot.visibleCount} / ${snapshot.totalCount}`)
-        this.statsRight.setValue(`${snapshot.rootCount}`)
-        this.siblingGapSlider.setValue(snapshot.layoutSettings.siblingGap)
-        this.branchPaddingSlider.setValue(snapshot.layoutSettings.branchPadding)
-        this.rootGapSlider.setValue(snapshot.layoutSettings.rootGap)
-        this.subtreeScaleSlider.setValue(snapshot.layoutSettings.subtreeScale)
-        this.minLengthSlider.setValue(snapshot.edgeSettings.minLength)
-        this.parentFactorSlider.setValue(snapshot.edgeSettings.parentOrbitFactor)
-        this.childFactorSlider.setValue(snapshot.edgeSettings.childFootprintFactor)
-        this.nodeBaseSlider.setValue(snapshot.edgeSettings.nodeBaseLength)
+        this.statsLeft.setValue(`${snapshot.visibleCount}`)
+        this.statsRight.setValue(`${snapshot.totalCount}`)
       }),
     )
   }
@@ -621,15 +554,10 @@ export class ControlPanel {
   }
 
   destroy() {
+    this.rootCountSlider.destroy()
     this.depthSlider.destroy()
-    this.siblingGapSlider.destroy()
-    this.branchPaddingSlider.destroy()
-    this.rootGapSlider.destroy()
-    this.subtreeScaleSlider.destroy()
-    this.minLengthSlider.destroy()
-    this.parentFactorSlider.destroy()
-    this.childFactorSlider.destroy()
-    this.nodeBaseSlider.destroy()
+    this.childMinSlider.destroy()
+    this.childMaxSlider.destroy()
     this.unsubscribers.forEach((unsubscribe) => unsubscribe())
   }
 
@@ -638,6 +566,20 @@ export class ControlPanel {
   }
 }
 
-export function createControlPanel(store: GraphStore, layoutEngine: GraphLayoutEngine) {
-  return new ControlPanel(store, layoutEngine)
+export function createControlPanel(
+  store: GraphStore,
+  layoutEngine: GraphLayoutEngine,
+  onRootCountChange?: (rootCount: number) => void,
+  onDepthChange?: (depth: number) => void,
+  onChildMinChange?: (childMin: number) => void,
+  onChildMaxChange?: (childMax: number) => void,
+) {
+  return new ControlPanel(
+    store,
+    layoutEngine,
+    onRootCountChange,
+    onDepthChange,
+    onChildMinChange,
+    onChildMaxChange,
+  )
 }

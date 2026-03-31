@@ -1,21 +1,21 @@
 import { EventType, adaptor, type InputNode, type Link } from 'webcola'
-import { exampleGraph, type GraphDataset, type GraphNodeRecord } from '../data/exampleGraph'
+import { type GraphNodeRecord } from '../data/exampleGraph'
 import { GraphStore, type GraphStoreSnapshot } from '../store/graphStore'
 
 const NODE_RADIUS = 30
 const COLLAPSED_RADIUS = NODE_RADIUS + 16
 const COLLISION_PADDING = 14
 const DEFAULT_EDGE_SETTINGS = {
-  minLength: 84,
-  parentOrbitFactor: 0.58,
-  childFootprintFactor: 0.34,
-  nodeBaseLength: 18,
+  minLength: 20,
+  parentOrbitFactor: 0.08,
+  childFootprintFactor: 0.04,
+  nodeBaseLength: 0,
 } as const
 const DEFAULT_LAYOUT_SETTINGS = {
-  siblingGap: 14,
-  branchPadding: 14,
-  rootGap: 30,
-  subtreeScale: 0.68,
+  siblingGap: 0,
+  branchPadding: 0,
+  rootGap: 140,
+  subtreeScale: 0.35,
 } as const
 
 type LayoutListener = (snapshot: LayoutSnapshot) => void
@@ -171,7 +171,6 @@ function getCollisionRadius(state: VisibleNodeState) {
 }
 
 export class GraphLayoutEngine {
-  private readonly graph: GraphDataset
   private readonly store: GraphStore
   private readonly listeners = new Set<LayoutListener>()
   private readonly fitListeners = new Set<FitListener>()
@@ -184,12 +183,15 @@ export class GraphLayoutEngine {
   private edgeSettings: EdgeLengthSettings = { ...DEFAULT_EDGE_SETTINGS }
   private layoutSettings: LayoutSettings = { ...DEFAULT_LAYOUT_SETTINGS }
 
-  constructor(store: GraphStore, graph: GraphDataset = exampleGraph) {
+  constructor(store: GraphStore) {
     this.store = store
-    this.graph = graph
     this.unsubscribeFromStore = this.store.subscribe((snapshot) => {
       this.relayout(snapshot)
     })
+  }
+
+  private get graph() {
+    return this.store.graph
   }
 
   subscribe(listener: LayoutListener) {
@@ -692,7 +694,6 @@ export class GraphLayoutEngine {
 
 export function createLayoutEngine(
   store: GraphStore,
-  graph: GraphDataset = exampleGraph,
 ) {
-  return new GraphLayoutEngine(store, graph)
+  return new GraphLayoutEngine(store)
 }

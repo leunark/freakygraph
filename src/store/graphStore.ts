@@ -14,7 +14,7 @@ export function getDepthControlMax(graph: GraphDataset) {
 }
 
 export class GraphStore {
-  readonly graph: GraphDataset
+  graph: GraphDataset
 
   private expanded = new Set<string>()
   private listeners = new Set<GraphStoreListener>()
@@ -69,6 +69,17 @@ export class GraphStore {
 
   collapseAll() {
     this.expanded.clear()
+    this.emit()
+  }
+
+  setGraph(graph: GraphDataset) {
+    if (graph === this.graph) {
+      return
+    }
+
+    this.graph = graph
+    this.expanded.clear()
+    this.maxDepth = graph.maxDepth
     this.emit()
   }
 

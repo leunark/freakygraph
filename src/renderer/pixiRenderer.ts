@@ -7,7 +7,14 @@ import {
   Text,
   TextStyle,
 } from 'pixi.js'
-import { exampleGraph } from '../data/exampleGraph'
+import {
+  createExampleGraph,
+  DEFAULT_CHILD_MAX_COUNT,
+  DEFAULT_CHILD_MIN_COUNT,
+  DEFAULT_EXAMPLE_DEPTH,
+  DEFAULT_EXAMPLE_ROOT_COUNT,
+  exampleGraph,
+} from '../data/exampleGraph'
 import {
   createLayoutEngine,
   type LayoutEdge,
@@ -243,14 +250,50 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
   app.start()
 
   const graphStore = createGraphStore(exampleGraph)
-  const layoutEngine = createLayoutEngine(graphStore, exampleGraph)
+  const layoutEngine = createLayoutEngine(graphStore)
   const backgroundLayer = new Container()
   const backdrop = new Graphics()
   const sceneContainer = new Container()
   const edgeLayer = new Graphics()
   const nodeLayer = new Container()
   const hudLayer = new Container()
-  const controlPanel = createControlPanel(graphStore, layoutEngine)
+  let rootNodeCount = DEFAULT_EXAMPLE_ROOT_COUNT
+  let graphDepth = DEFAULT_EXAMPLE_DEPTH
+  let childMinCount = DEFAULT_CHILD_MIN_COUNT
+  let childMaxCount = DEFAULT_CHILD_MAX_COUNT
+  const rebuildGraph = () => {
+    graphStore.setGraph(createExampleGraph({
+      rootCount: rootNodeCount,
+      depth: graphDepth,
+      childMinCount,
+      childMaxCount,
+    }))
+    window.requestAnimationFrame(() => {
+      layoutEngine.requestFitToScreen()
+    })
+  }
+  const controlPanel = createControlPanel(
+    graphStore,
+    layoutEngine,
+    (rootCount) => {
+      rootNodeCount = rootCount
+      rebuildGraph()
+    },
+    (depth) => {
+      graphDepth = depth
+      rebuildGraph()
+    },
+    (childMin) => {
+      childMinCount = childMin
+      childMaxCount = Math.max(childMaxCount, childMin)
+      rebuildGraph()
+    },
+    (childMax) => {
+      childMaxCount = childMax
+      childMinCount = Math.min(childMinCount, childMax)
+      rebuildGraph()
+    },
+  )
   const nodeVisuals = new Map<string, NodeVisual>()
 
   let currentSnapshot: LayoutSnapshot | null = null
