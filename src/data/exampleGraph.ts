@@ -29,12 +29,29 @@ interface MutableBranch {
 }
 
 export const DEFAULT_EXAMPLE_ROOT_COUNT = 4
+export const MAX_EXAMPLE_ROOT_COUNT = 6
 export const MIN_EXAMPLE_ROOT_COUNT = 1
 export const DEFAULT_EXAMPLE_DEPTH = 3
-export const MIN_EXAMPLE_DEPTH = 0
+export const MAX_EXAMPLE_DEPTH = 5
+export const MIN_EXAMPLE_DEPTH = 1
 export const DEFAULT_CHILD_MIN_COUNT = 3
 export const DEFAULT_CHILD_MAX_COUNT = 5
 export const MIN_CHILD_COUNT = 0
+export const MAX_CHILD_COUNT = 5
+
+export interface ExampleGraphOptions {
+  rootCount?: number
+  depth?: number
+  childMinCount?: number
+  childMaxCount?: number
+}
+
+export interface ExampleGraphSettings {
+  rootCount: number
+  depth: number
+  childMinCount: number
+  childMaxCount: number
+}
 
 const ROOT_LABELS = [
   'Atlas',
@@ -92,15 +109,24 @@ const LABEL_SUFFIXES = [
 ]
 
 function normalizeRootCount(targetRootCount: number) {
-  return Math.max(MIN_EXAMPLE_ROOT_COUNT, Math.round(targetRootCount))
+  return Math.min(
+    MAX_EXAMPLE_ROOT_COUNT,
+    Math.max(MIN_EXAMPLE_ROOT_COUNT, Math.round(targetRootCount)),
+  )
 }
 
 function normalizeDepth(targetDepth: number) {
-  return Math.max(MIN_EXAMPLE_DEPTH, Math.round(targetDepth))
+  return Math.min(
+    MAX_EXAMPLE_DEPTH,
+    Math.max(MIN_EXAMPLE_DEPTH, Math.round(targetDepth)),
+  )
 }
 
 function normalizeChildCount(targetCount: number) {
-  return Math.max(MIN_CHILD_COUNT, Math.round(targetCount))
+  return Math.min(
+    MAX_CHILD_COUNT,
+    Math.max(MIN_CHILD_COUNT, Math.round(targetCount)),
+  )
 }
 
 function createSeededRandom(seed: number) {
@@ -189,11 +215,23 @@ function buildDataset(definition: GraphBranchInput[]): GraphDataset {
   }
 }
 
-interface ExampleGraphOptions {
-  rootCount?: number
-  depth?: number
-  childMinCount?: number
-  childMaxCount?: number
+export function normalizeExampleGraphSettings(
+  options: ExampleGraphOptions = {},
+): ExampleGraphSettings {
+  const rootCount = normalizeRootCount(options.rootCount ?? DEFAULT_EXAMPLE_ROOT_COUNT)
+  const depth = normalizeDepth(options.depth ?? DEFAULT_EXAMPLE_DEPTH)
+  const childMinCount = normalizeChildCount(options.childMinCount ?? DEFAULT_CHILD_MIN_COUNT)
+  const childMaxCount = Math.max(
+    childMinCount,
+    normalizeChildCount(options.childMaxCount ?? DEFAULT_CHILD_MAX_COUNT),
+  )
+
+  return {
+    rootCount,
+    depth,
+    childMinCount,
+    childMaxCount,
+  }
 }
 
 export function createExampleGraph(
@@ -203,21 +241,8 @@ export function createExampleGraph(
     typeof options === 'number'
       ? { rootCount: options }
       : options
-  const rootCount = normalizeRootCount(
-    normalizedOptions.rootCount ?? DEFAULT_EXAMPLE_ROOT_COUNT,
-  )
-  const maxDepth = normalizeDepth(
-    normalizedOptions.depth ?? DEFAULT_EXAMPLE_DEPTH,
-  )
-  const childMinCount = normalizeChildCount(
-    normalizedOptions.childMinCount ?? DEFAULT_CHILD_MIN_COUNT,
-  )
-  const childMaxCount = Math.max(
-    childMinCount,
-    normalizeChildCount(
-      normalizedOptions.childMaxCount ?? DEFAULT_CHILD_MAX_COUNT,
-    ),
-  )
+  const { rootCount, depth: maxDepth, childMinCount, childMaxCount } =
+    normalizeExampleGraphSettings(normalizedOptions)
   const roots = Array.from({ length: rootCount }, (_, index) => createRootBranch(index))
   const random = createSeededRandom(
     rootCount * 2654435761 +
@@ -261,9 +286,6 @@ export function createExampleGraph(
   return buildDataset(roots.map(toBranchInput))
 }
 
-export const exampleGraph = createExampleGraph({
-  rootCount: DEFAULT_EXAMPLE_ROOT_COUNT,
-  depth: DEFAULT_EXAMPLE_DEPTH,
-  childMinCount: DEFAULT_CHILD_MIN_COUNT,
-  childMaxCount: DEFAULT_CHILD_MAX_COUNT,
-})
+export const DEFAULT_EXAMPLE_GRAPH_SETTINGS = normalizeExampleGraphSettings()
+
+export const exampleGraph = createExampleGraph(DEFAULT_EXAMPLE_GRAPH_SETTINGS)

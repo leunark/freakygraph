@@ -9,10 +9,9 @@ import {
 } from 'pixi.js'
 import {
   createExampleGraph,
-  DEFAULT_CHILD_MAX_COUNT,
-  DEFAULT_CHILD_MIN_COUNT,
-  DEFAULT_EXAMPLE_DEPTH,
-  DEFAULT_EXAMPLE_ROOT_COUNT,
+  DEFAULT_EXAMPLE_GRAPH_SETTINGS,
+  normalizeExampleGraphSettings,
+  type ExampleGraphSettings,
   exampleGraph,
 } from '../data/exampleGraph'
 import {
@@ -20,8 +19,8 @@ import {
   type LayoutEdge,
   type LayoutNode,
   type LayoutSnapshot,
+  type LayoutSolverMode,
 } from '../engine/layoutEngine'
-import { createControlPanel } from '../hud/controlPanel'
 import { createGraphStore } from '../store/graphStore'
 
 const CAMERA_MIN_SCALE = 0.012
@@ -68,6 +67,18 @@ interface NodeVisual {
 
 export interface PixiRendererHandle {
   destroy: () => void
+  subscribe: (listener: (snapshot: RendererHudSnapshot) => void) => () => void
+  updateGraphSettings: (settings: ExampleGraphSettings) => void
+  updateSolverMode: (mode: LayoutSolverMode) => void
+  expandAll: () => void
+  collapseAll: () => void
+  fitToScreen: () => void
+}
+
+export interface RendererHudSnapshot {
+  visibleCount: number
+  totalCount: number
+  solverMode: LayoutSolverMode
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -247,7 +258,7 @@ function fitSceneToSnapshot(scene: Container, snapshot: LayoutSnapshot, width: n
     return
   }
 
-  const padding = 120
+  const padding = clamp(Math.min(width, height) * 0.12, 40, 120)
   const availableWidth = Math.max(1, width - padding * 2)
   const availableHeight = Math.max(1, height - padding * 2)
   const scale = clamp(
@@ -277,6 +288,14 @@ async function loadNodeFont() {
   }
 }
 
+function toHudSnapshot(snapshot: LayoutSnapshot): RendererHudSnapshot {
+  return {
+    visibleCount: snapshot.visibleCount,
+    totalCount: snapshot.totalCount,
+    solverMode: snapshot.solverMode,
+  }
+}
+
 export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiRendererHandle> {
   await loadNodeFont()
 
@@ -300,47 +319,30 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
   const sceneContainer = new Container()
   const edgeLayer = new Graphics()
   const nodeLayer = new Container()
-  const hudLayer = new Container()
-  let rootNodeCount = DEFAULT_EXAMPLE_ROOT_COUNT
-  let graphDepth = DEFAULT_EXAMPLE_DEPTH
-  let childMinCount = DEFAULT_CHILD_MIN_COUNT
-  let childMaxCount = DEFAULT_CHILD_MAX_COUNT
-  const rebuildGraph = () => {
-    graphStore.setGraph(createExampleGraph({
-      rootCount: rootNodeCount,
-      depth: graphDepth,
-      childMinCount,
-      childMaxCount,
-    }))
+  const hudListeners = new Set<(snapshot: RendererHudSnapshot) => void>()
+  let graphSettings = { ...DEFAULT_EXAMPLE_GRAPH_SETTINGS }
+  const rebuildGraph = (nextSettings: ExampleGraphSettings) => {
+    const normalizedSettings = normalizeExampleGraphSettings(nextSettings)
+    const graphConfigChanged =
+      normalizedSettings.rootCount !== graphSettings.rootCount ||
+      normalizedSettings.depth !== graphSettings.depth ||
+      normalizedSettings.childMinCount !== graphSettings.childMinCount ||
+      normalizedSettings.childMaxCount !== graphSettings.childMaxCount
+
+    if (!graphConfigChanged) {
+      return
+    }
+
+    graphSettings = normalizedSettings
+    graphStore.setGraph(createExampleGraph(graphSettings))
     window.requestAnimationFrame(() => {
       layoutEngine.requestFitToScreen()
     })
   }
-  const controlPanel = createControlPanel(
-    graphStore,
-    layoutEngine,
-    (rootCount) => {
-      rootNodeCount = rootCount
-      rebuildGraph()
-    },
-    (depth) => {
-      graphDepth = depth
-      rebuildGraph()
-    },
-    (childMin) => {
-      childMinCount = childMin
-      childMaxCount = Math.max(childMaxCount, childMin)
-      rebuildGraph()
-    },
-    (childMax) => {
-      childMaxCount = childMax
-      childMinCount = Math.min(childMinCount, childMax)
-      rebuildGraph()
-    },
-  )
   const nodeVisuals = new Map<string, NodeVisual>()
 
   let currentSnapshot: LayoutSnapshot | null = null
+  let currentHudSnapshot: RendererHudSnapshot | null = null
   let didAutoFit = false
   let destroyed = false
   let isPanning = false
@@ -352,9 +354,8 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
   let panStartPointer = new Point()
 
   sceneContainer.addChild(edgeLayer, nodeLayer)
-  hudLayer.addChild(controlPanel.container)
   backgroundLayer.addChild(backdrop)
-  app.stage.addChild(backgroundLayer, sceneContainer, hudLayer)
+  app.stage.addChild(backgroundLayer, sceneContainer)
   app.stage.eventMode = 'static'
 
   const resizeStage = () => {
@@ -383,7 +384,6 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
       .stroke({ color: 0xffffff, width: 1, alpha: 0.02 })
 
     app.stage.hitArea = new Rectangle(0, 0, width, height)
-    controlPanel.resize(width, height)
     layoutEngine.setViewportSize(width, height)
     app.render()
   }
@@ -475,12 +475,6 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
 
     pointerDownClient = new Point(clientX, clientY)
 
-    if (controlPanel.containsPoint(clientX, clientY)) {
-      pressedNodeId = null
-      isPanning = false
-      return
-    }
-
     const pickedNode = pickNodeAt(clientX, clientY)
 
     if (pickedNode) {
@@ -515,6 +509,19 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
 
   const syncSnapshot = (snapshot: LayoutSnapshot) => {
     currentSnapshot = snapshot
+    const hudSnapshot = toHudSnapshot(snapshot)
+    const hudChanged =
+      !currentHudSnapshot ||
+      hudSnapshot.visibleCount !== currentHudSnapshot.visibleCount ||
+      hudSnapshot.totalCount !== currentHudSnapshot.totalCount ||
+      hudSnapshot.solverMode !== currentHudSnapshot.solverMode
+
+    currentHudSnapshot = hudSnapshot
+
+    if (hudChanged) {
+      hudListeners.forEach((listener) => listener(hudSnapshot))
+    }
+
     const now = performance.now()
     const activeIds = new Set(snapshot.nodes.map((node) => node.id))
 
@@ -694,6 +701,32 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
   app.render()
 
   return {
+    subscribe: (listener) => {
+      hudListeners.add(listener)
+
+      if (currentHudSnapshot) {
+        listener(currentHudSnapshot)
+      }
+
+      return () => {
+        hudListeners.delete(listener)
+      }
+    },
+    updateGraphSettings: (settings) => {
+      rebuildGraph(settings)
+    },
+    updateSolverMode: (mode) => {
+      layoutEngine.updateSolverMode(mode)
+    },
+    expandAll: () => {
+      graphStore.expandAll()
+    },
+    collapseAll: () => {
+      graphStore.collapseAll()
+    },
+    fitToScreen: () => {
+      layoutEngine.requestFitToScreen()
+    },
     destroy: () => {
       if (destroyed) {
         return
@@ -702,7 +735,7 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
       destroyed = true
       unsubscribeLayout()
       unsubscribeFit()
-      controlPanel.destroy()
+      hudListeners.clear()
       layoutEngine.destroy()
       window.removeEventListener('pointermove', pointerMove)
       window.removeEventListener('pointerup', pointerUp)

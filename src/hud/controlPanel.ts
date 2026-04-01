@@ -442,7 +442,7 @@ class HudSelect<T extends string> {
   readonly container = new Container()
   readonly height = SLIDER_HEIGHT
 
-  private static activeSelect: HudSelect<any> | null = null
+  private static activeSelect: HudSelect<string> | null = null
   private readonly shell = new Graphics()
   private readonly field = new Graphics()
   private readonly menu = new Container()

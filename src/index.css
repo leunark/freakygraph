@@ -25,9 +25,252 @@ body {
     linear-gradient(180deg, #020304 0%, #05070a 46%, #020304 100%);
 }
 
-canvas {
+.app-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.graph-canvas {
   display: block;
   width: 100%;
   height: 100%;
   touch-action: none;
+}
+
+.gizmo-shell {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: calc(100vw - 24px);
+  pointer-events: none;
+}
+
+.gizmo-toggle,
+.gizmo-action,
+.gizmo-select,
+.gizmo-range {
+  font: inherit;
+}
+
+.gizmo-toggle {
+  pointer-events: auto;
+  border: 1px solid rgba(120, 152, 198, 0.36);
+  border-radius: 999px;
+  padding: 0.8rem 1rem;
+  background:
+    linear-gradient(135deg, rgba(24, 31, 42, 0.96), rgba(11, 15, 21, 0.98));
+  color: #f3f8ff;
+  font-size: 0.86rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.34);
+}
+
+.gizmo-panel {
+  pointer-events: auto;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100dvh - 78px);
+  overflow: auto;
+  border: 1px solid rgba(77, 96, 124, 0.58);
+  border-radius: 24px;
+  padding: 1rem;
+  background:
+    radial-gradient(circle at top left, rgba(109, 144, 198, 0.18), transparent 36%),
+    linear-gradient(180deg, rgba(10, 14, 20, 0.96), rgba(5, 8, 12, 0.98));
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.5);
+  color: #e4ebf6;
+  backdrop-filter: blur(18px);
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  touch-action: pan-y;
+}
+
+.gizmo-header h1,
+.gizmo-section h2,
+.gizmo-copy,
+.gizmo-eyebrow,
+.gizmo-section-note,
+.gizmo-stat-card span,
+.gizmo-stat-card strong,
+.gizmo-control-row,
+.gizmo-control-hint,
+.gizmo-action,
+.gizmo-select {
+  margin: 0;
+}
+
+.gizmo-header {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.gizmo-eyebrow {
+  color: #87b4ff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.gizmo-header h1 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #f7fbff;
+}
+
+.gizmo-copy {
+  color: #99a8bf;
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.gizmo-section + .gizmo-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(66, 84, 109, 0.44);
+}
+
+.gizmo-section-header {
+  display: grid;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.gizmo-section h2 {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #f7fbff;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.gizmo-section-note {
+  color: #8d9ab0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.gizmo-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.gizmo-stat-card {
+  display: grid;
+  gap: 0.3rem;
+  border: 1px solid rgba(49, 63, 83, 0.76);
+  border-radius: 18px;
+  padding: 0.85rem 0.9rem;
+  background: rgba(8, 12, 18, 0.92);
+}
+
+.gizmo-stat-card span {
+  color: #95a1b3;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.gizmo-stat-card strong {
+  color: #f7fbff;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.gizmo-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.gizmo-action {
+  min-height: 44px;
+  border: 1px solid rgba(71, 93, 124, 0.64);
+  border-radius: 16px;
+  padding: 0.8rem 0.9rem;
+  background: rgba(12, 17, 25, 0.96);
+  color: #f6f9ff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.gizmo-action-wide {
+  grid-column: 1 / -1;
+}
+
+.gizmo-control-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.gizmo-control {
+  display: grid;
+  gap: 0.42rem;
+}
+
+.gizmo-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #dbe4f4;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.gizmo-control-row output {
+  color: #87b4ff;
+  font-size: 0.78rem;
+}
+
+.gizmo-control-hint {
+  color: #8491a6;
+  font-size: 0.68rem;
+}
+
+.gizmo-range {
+  width: 100%;
+  accent-color: #8cb9ff;
+  cursor: pointer;
+}
+
+.gizmo-select {
+  min-height: 44px;
+  border: 1px solid rgba(60, 77, 101, 0.84);
+  border-radius: 16px;
+  padding: 0.75rem 0.9rem;
+  background: rgba(8, 12, 18, 0.94);
+  color: #f6f9ff;
+}
+
+@media (max-width: 720px) {
+  .gizmo-shell {
+    top: 10px;
+    left: 10px;
+    max-width: calc(100vw - 20px);
+  }
+
+  .gizmo-panel {
+    width: min(100vw - 20px, 420px);
+    max-height: calc(100dvh - 72px);
+    border-radius: 20px;
+  }
+
+  .gizmo-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .gizmo-action-wide {
+    grid-column: auto;
+  }
 }
