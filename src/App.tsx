@@ -100,6 +100,24 @@ function App() {
     }
   }, [gizmoOpen])
 
+  useEffect(() => {
+    const preventGestureZoom = (event: Event) => {
+      event.preventDefault()
+    }
+
+    const gestureEvents = ['gesturestart', 'gesturechange', 'gestureend'] as const
+
+    for (const eventName of gestureEvents) {
+      document.addEventListener(eventName, preventGestureZoom, { passive: false })
+    }
+
+    return () => {
+      for (const eventName of gestureEvents) {
+        document.removeEventListener(eventName, preventGestureZoom)
+      }
+    }
+  }, [])
+
   const updateGraphSettings = (
     recipe: (current: ExampleGraphSettings) => ExampleGraphSettings,
   ) => {
