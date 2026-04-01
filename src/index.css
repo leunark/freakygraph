@@ -46,8 +46,8 @@ body {
   z-index: 18;
   pointer-events: none;
   display: grid;
-  gap: 0.18rem;
-  min-width: 76px;
+  gap: 0.45rem;
+  min-width: 92px;
   border: 1px solid rgba(98, 118, 148, 0.42);
   border-radius: 16px;
   padding: 0.72rem 0.85rem;
@@ -56,6 +56,11 @@ body {
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.34);
   color: #edf4ff;
   backdrop-filter: blur(14px);
+}
+
+.fps-badge-row {
+  display: grid;
+  gap: 0.18rem;
 }
 
 .fps-badge span,
@@ -295,7 +300,7 @@ body {
   .fps-badge {
     top: 10px;
     right: 10px;
-    min-width: 68px;
+    min-width: 84px;
     border-radius: 14px;
     padding: 0.62rem 0.72rem;
   }

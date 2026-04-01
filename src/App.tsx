@@ -23,6 +23,7 @@ const INITIAL_HUD_SNAPSHOT: RendererHudSnapshot = {
   visibleCount: 0,
   totalCount: 0,
   fps: 0,
+  scale: 1,
 }
 
 function areGraphSettingsEqual(left: ExampleGraphSettings, right: ExampleGraphSettings) {
@@ -115,8 +116,14 @@ function App() {
     <div className="app-shell">
       <canvas ref={canvasRef} className="graph-canvas" />
       <div className="fps-badge" aria-live="off">
-        <span>FPS</span>
-        <strong>{hudSnapshot.fps > 0 ? hudSnapshot.fps : '--'}</strong>
+        <div className="fps-badge-row">
+          <span>FPS</span>
+          <strong>{hudSnapshot.fps > 0 ? hudSnapshot.fps : '--'}</strong>
+        </div>
+        <div className="fps-badge-row">
+          <span>Scale</span>
+          <strong>{hudSnapshot.scale.toFixed(2)}x</strong>
+        </div>
       </div>
       <GizmoPanel
         open={gizmoOpen}

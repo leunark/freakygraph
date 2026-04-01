@@ -7,10 +7,18 @@ export interface GraphStoreSnapshot {
   maxDepth: number
 }
 
+export type GraphResetExpansion = 'collapsed' | 'roots' | 'all'
+
 type GraphStoreListener = (snapshot: GraphStoreSnapshot) => void
 
 export function getDepthControlMax(graph: GraphDataset) {
   return Math.max(DEFAULT_DEPTH_CONTROL_MAX, graph.maxDepth)
+}
+
+function getExpandableNodeIds(graph: GraphDataset) {
+  return Object.values(graph.nodes)
+    .filter((node) => node.children.length > 0)
+    .map((node) => node.id)
 }
 
 export class GraphStore {
@@ -58,11 +66,7 @@ export class GraphStore {
   }
 
   expandAll() {
-    this.expanded = new Set(
-      Object.values(this.graph.nodes)
-        .filter((node) => node.children.length > 0)
-        .map((node) => node.id),
-    )
+    this.expanded = new Set(getExpandableNodeIds(this.graph))
     this.maxDepth = getDepthControlMax(this.graph)
     this.emit()
   }
@@ -72,13 +76,25 @@ export class GraphStore {
     this.emit()
   }
 
-  setGraph(graph: GraphDataset) {
+  setGraph(graph: GraphDataset, expansion: GraphResetExpansion = 'collapsed') {
     if (graph === this.graph) {
       return
     }
 
     this.graph = graph
     this.expanded.clear()
+
+    if (expansion === 'all') {
+      this.expanded = new Set(getExpandableNodeIds(this.graph))
+    } else if (expansion === 'roots') {
+      this.expanded = new Set(
+        this.graph.roots.filter((rootId) => {
+          const node = this.graph.nodes[rootId]
+          return Boolean(node && node.children.length > 0)
+        }),
+      )
+    }
+
     this.maxDepth = graph.maxDepth
     this.emit()
   }

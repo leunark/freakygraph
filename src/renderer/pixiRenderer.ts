@@ -20,7 +20,7 @@ import {
   type LayoutNode,
   type LayoutSnapshot,
 } from '../engine/layoutEngine'
-import { createGraphStore } from '../store/graphStore'
+import { createGraphStore, type GraphResetExpansion } from '../store/graphStore'
 
 const CAMERA_MIN_SCALE = 0.012
 const CAMERA_MAX_SCALE = 6
@@ -28,6 +28,11 @@ const ENTER_EXIT_DURATION = 400
 const NODE_SPRING_STRENGTH = 0.12
 const NODE_SPRING_DAMPING = 0.74
 const NODE_DRAG_THRESHOLD = 6
+const NODE_SETTLE_DISTANCE = 0.32
+const NODE_SETTLE_VELOCITY = 0.05
+const LABEL_HIDE_SCALE = 0.16
+const EDGE_HIDE_SCALE = 0.16
+const VIEW_CULL_MARGIN_PX = 120
 const NODE_FONT_FAMILY = '"JetBrains Mono", Consolas, "Courier New", monospace'
 const TEXT_RESOLUTION =
   typeof window === 'undefined'
@@ -77,6 +82,14 @@ export interface RendererHudSnapshot {
   visibleCount: number
   totalCount: number
   fps: number
+  scale: number
+}
+
+interface WorldBounds {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -279,6 +292,62 @@ function screenToWorld(scene: Container, clientX: number, clientY: number) {
   }
 }
 
+function getWorldViewportBounds(
+  scene: Container,
+  width: number,
+  height: number,
+  marginPx = VIEW_CULL_MARGIN_PX,
+): WorldBounds {
+  const scale = Math.max(scene.scale.x, CAMERA_MIN_SCALE)
+  const margin = marginPx / scale
+  const minX = (-scene.position.x) / scale - margin
+  const minY = (-scene.position.y) / scale - margin
+  const maxX = (width - scene.position.x) / scale + margin
+  const maxY = (height - scene.position.y) / scale + margin
+
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+  }
+}
+
+function circleOverlapsBounds(
+  x: number,
+  y: number,
+  radius: number,
+  bounds: WorldBounds,
+) {
+  return !(
+    x + radius < bounds.minX ||
+    x - radius > bounds.maxX ||
+    y + radius < bounds.minY ||
+    y - radius > bounds.maxY
+  )
+}
+
+function segmentBoundsOverlap(
+  bounds: WorldBounds,
+  sourceX: number,
+  sourceY: number,
+  targetX: number,
+  targetY: number,
+  padding = 0,
+) {
+  const minX = Math.min(sourceX, targetX) - padding
+  const maxX = Math.max(sourceX, targetX) + padding
+  const minY = Math.min(sourceY, targetY) - padding
+  const maxY = Math.max(sourceY, targetY) + padding
+
+  return !(
+    maxX < bounds.minX ||
+    minX > bounds.maxX ||
+    maxY < bounds.minY ||
+    minY > bounds.maxY
+  )
+}
+
 function fitSceneToSnapshot(scene: Container, snapshot: LayoutSnapshot, width: number, height: number) {
   if (snapshot.bounds.width <= 0 || snapshot.bounds.height <= 0) {
     scene.position.set(width / 2, height / 2)
@@ -325,11 +394,13 @@ async function loadNodeFont() {
 function toHudSnapshot(
   snapshot: LayoutSnapshot | null,
   fps: number,
+  scale: number,
 ): RendererHudSnapshot {
   return {
     visibleCount: snapshot?.visibleCount ?? 0,
     totalCount: snapshot?.totalCount ?? 0,
     fps,
+    scale: Math.round(scale * 100) / 100,
   }
 }
 
@@ -358,6 +429,14 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
   const nodeLayer = new Container()
   const hudListeners = new Set<(snapshot: RendererHudSnapshot) => void>()
   let graphSettings = { ...DEFAULT_EXAMPLE_GRAPH_SETTINGS }
+  let hardResetPending = false
+
+  const getExpandableCount = () =>
+    Object.values(graphStore.graph.nodes).reduce(
+      (count, node) => count + (node.children.length > 0 ? 1 : 0),
+      0,
+    )
+
   const rebuildGraph = (nextSettings: ExampleGraphSettings) => {
     const normalizedSettings = normalizeExampleGraphSettings(nextSettings)
     const graphConfigChanged =
@@ -370,8 +449,18 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
       return
     }
 
+    const previousSnapshot = graphStore.getSnapshot()
+    const expandableCount = getExpandableCount()
+    const nextExpansion: GraphResetExpansion =
+      previousSnapshot.expanded.size === 0
+        ? 'collapsed'
+        : previousSnapshot.expanded.size >= expandableCount
+          ? 'all'
+          : 'roots'
+
     graphSettings = normalizedSettings
-    graphStore.setGraph(createExampleGraph(graphSettings))
+    hardResetPending = true
+    graphStore.setGraph(createExampleGraph(graphSettings), nextExpansion)
     window.requestAnimationFrame(() => {
       layoutEngine.requestFitToScreen()
     })
@@ -381,6 +470,7 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
   let currentSnapshot: LayoutSnapshot | null = null
   let currentHudSnapshot: RendererHudSnapshot | null = null
   let currentFps = 0
+  let currentScale = 1
   let lastFpsSampleAt = 0
   let didAutoFit = false
   let destroyed = false
@@ -399,6 +489,20 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
   let viewportSyncFrame = 0
   let viewportSyncTimeout = 0
   let refitAfterViewportRefresh = false
+  let lastSceneX = 0
+  let lastSceneY = 0
+  let lastSceneScale = 1
+  let currentViewBounds: WorldBounds = {
+    minX: 0,
+    minY: 0,
+    maxX: 0,
+    maxY: 0,
+  }
+  let labelsVisible = true
+  let edgesVisible = true
+  let cullingDirty = true
+  let edgeGeometryDirty = true
+  const activeNodeIds = new Set<string>()
 
   sceneContainer.addChild(edgeLayer, nodeLayer)
   backgroundLayer.addChild(backdrop)
@@ -488,7 +592,7 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
     const scale = sceneContainer.scale.x
 
     for (const visual of Array.from(nodeVisuals.values()).reverse()) {
-      if (visual.phase === 'exiting') {
+      if (visual.phase === 'exiting' || !visual.container.visible) {
         continue
       }
 
@@ -558,6 +662,9 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
       draggedVisual.velocityX = 0
       draggedVisual.velocityY = 0
       draggedVisual.container.position.set(draggedVisual.displayX, draggedVisual.displayY)
+      activeNodeIds.add(dragNodeId)
+      cullingDirty = true
+      edgeGeometryDirty = true
       return
     }
 
@@ -590,6 +697,7 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
     }
 
     if (dragNodeId) {
+      activeNodeIds.add(dragNodeId)
       dragNodeId = null
       pressedNodeId = null
       isPanning = false
@@ -665,12 +773,13 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
   canvas.addEventListener('wheel', handleWheel, { passive: false })
 
   const publishHudSnapshot = () => {
-    const hudSnapshot = toHudSnapshot(currentSnapshot, currentFps)
+    const hudSnapshot = toHudSnapshot(currentSnapshot, currentFps, currentScale)
     const hudChanged =
       !currentHudSnapshot ||
       hudSnapshot.visibleCount !== currentHudSnapshot.visibleCount ||
       hudSnapshot.totalCount !== currentHudSnapshot.totalCount ||
-      hudSnapshot.fps !== currentHudSnapshot.fps
+      hudSnapshot.fps !== currentHudSnapshot.fps ||
+      hudSnapshot.scale !== currentHudSnapshot.scale
 
     currentHudSnapshot = hudSnapshot
 
@@ -679,182 +788,80 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
     }
   }
 
-  const syncSnapshot = (snapshot: LayoutSnapshot) => {
-    currentSnapshot = snapshot
-    publishHudSnapshot()
+  const syncViewCulling = () => {
+    const nextLabelsVisible = sceneContainer.scale.x >= LABEL_HIDE_SCALE
+    const nextEdgesVisible = sceneContainer.scale.x >= EDGE_HIDE_SCALE
 
-    const now = performance.now()
-    const activeIds = new Set(snapshot.nodes.map((node) => node.id))
-
-    snapshot.nodes.forEach((node) => {
-      const existing = nodeVisuals.get(node.id)
-      const appearanceKey = getNodeAppearanceKey(node)
-
-      if (!existing) {
-        const visual = createNodeVisual(node)
-        const parentVisual = node.parentId ? nodeVisuals.get(node.parentId) : null
-        const originX = parentVisual ? parentVisual.displayX : node.x
-        const originY = parentVisual ? parentVisual.displayY : node.y
-
-        visual.data = node
-        visual.displayX = originX
-        visual.displayY = originY
-        visual.entryOriginX = originX
-        visual.entryOriginY = originY
-        visual.targetX = node.x
-        visual.targetY = node.y
-        visual.phase = 'entering'
-        visual.phaseStartedAt = now
-        visual.container.alpha = 0
-        visual.container.scale.set(0)
-        drawNode(visual)
-        nodeLayer.addChild(visual.container)
-        nodeVisuals.set(node.id, visual)
-        return
-      }
-
-      existing.data = node
-      existing.targetX = node.x
-      existing.targetY = node.y
-      existing.exitParentId = node.parentId
-
-      if (existing.phase === 'exiting') {
-        existing.phase = 'entering'
-        existing.phaseStartedAt = now
-        existing.entryOriginX = existing.displayX
-        existing.entryOriginY = existing.displayY
-      }
-
-      if (existing.appearanceKey !== appearanceKey) {
-        drawNode(existing)
-      }
-    })
-
-    nodeVisuals.forEach((visual, id) => {
-      if (activeIds.has(id) || visual.phase === 'exiting') {
-        return
-      }
-
-      visual.phase = 'exiting'
-      visual.phaseStartedAt = now
-      visual.exitOriginX = visual.displayX
-      visual.exitOriginY = visual.displayY
-    })
-
-    if (refitAfterViewportRefresh) {
-      refitAfterViewportRefresh = false
-      fitSceneToSnapshot(sceneContainer, snapshot, app.screen.width, app.screen.height)
+    if (nextEdgesVisible !== edgesVisible) {
+      edgeGeometryDirty = true
     }
 
-    if (!didAutoFit && currentSnapshot) {
-      didAutoFit = true
-      fitSceneToSnapshot(sceneContainer, currentSnapshot, app.screen.width, app.screen.height)
-    }
+    labelsVisible = nextLabelsVisible
+    edgesVisible = nextEdgesVisible
+    currentViewBounds = getWorldViewportBounds(
+      sceneContainer,
+      app.screen.width,
+      app.screen.height,
+    )
 
-    app.render()
+    nodeVisuals.forEach((visual) => {
+      const isVisible =
+        visual.phase !== 'steady' ||
+        circleOverlapsBounds(
+          visual.displayX,
+          visual.displayY,
+          visual.data.visualRadius + 24,
+          currentViewBounds,
+        )
+
+      visual.container.visible = isVisible
+      visual.label.visible = isVisible && labelsVisible
+    })
+
+    cullingDirty = false
   }
 
-  const unsubscribeLayout = layoutEngine.subscribe(syncSnapshot)
-  const unsubscribeFit = layoutEngine.onFitRequested(() => {
-    if (!currentSnapshot) {
+  const redrawEdges = () => {
+    edgeLayer.clear()
+    edgeGeometryDirty = false
+
+    if (!currentSnapshot || !edgesVisible) {
       return
     }
 
-    fitSceneToSnapshot(sceneContainer, currentSnapshot, app.screen.width, app.screen.height)
-  })
-
-  app.ticker.add(() => {
-    const now = performance.now()
-
-    if (now - lastFpsSampleAt >= 250) {
-      lastFpsSampleAt = now
-      currentFps = Math.max(0, Math.round(app.ticker.FPS))
-      publishHudSnapshot()
-    }
-
-    nodeVisuals.forEach((visual, id) => {
-      if (visual.phase === 'entering') {
-        const progress = clamp((now - visual.phaseStartedAt) / ENTER_EXIT_DURATION, 0, 1)
-        const eased = easeOutCubic(progress)
-
-        visual.displayX = visual.entryOriginX + (visual.targetX - visual.entryOriginX) * eased
-        visual.displayY = visual.entryOriginY + (visual.targetY - visual.entryOriginY) * eased
-        visual.velocityX = 0
-        visual.velocityY = 0
-        visual.container.alpha = eased
-        visual.container.scale.set(eased)
-
-        if (progress >= 1) {
-          visual.phase = 'steady'
-          visual.container.alpha = 1
-          visual.container.scale.set(1)
-        }
-      } else if (visual.phase === 'exiting') {
-        const progress = clamp((now - visual.phaseStartedAt) / ENTER_EXIT_DURATION, 0, 1)
-        const eased = easeOutCubic(progress)
-        const parentVisual = visual.exitParentId ? nodeVisuals.get(visual.exitParentId) : null
-        const exitTargetX = parentVisual ? parentVisual.displayX : visual.targetX
-        const exitTargetY = parentVisual ? parentVisual.displayY : visual.targetY
-
-        visual.displayX = visual.exitOriginX + (exitTargetX - visual.exitOriginX) * eased
-        visual.displayY = visual.exitOriginY + (exitTargetY - visual.exitOriginY) * eased
-        visual.velocityX = 0
-        visual.velocityY = 0
-        visual.container.alpha = 1 - eased
-        visual.container.scale.set(1 - eased)
-
-        if (progress >= 1) {
-          nodeLayer.removeChild(visual.container)
-          visual.container.destroy({ children: true })
-          nodeVisuals.delete(id)
-          return
-        }
-      } else {
-        if (dragNodeId === id) {
-          visual.velocityX = 0
-          visual.velocityY = 0
-          visual.container.alpha = 1
-          visual.container.scale.set(1)
-          visual.container.position.set(visual.displayX, visual.displayY)
-          return
-        }
-
-        visual.velocityX =
-          (visual.velocityX + (visual.targetX - visual.displayX) * NODE_SPRING_STRENGTH) *
-          NODE_SPRING_DAMPING
-        visual.velocityY =
-          (visual.velocityY + (visual.targetY - visual.displayY) * NODE_SPRING_STRENGTH) *
-          NODE_SPRING_DAMPING
-        visual.displayX += visual.velocityX
-        visual.displayY += visual.velocityY
-        visual.container.alpha = 1
-        visual.container.scale.set(1)
-      }
-
-      visual.container.position.set(visual.displayX, visual.displayY)
-    })
-
-    edgeLayer.clear()
     let hasActiveEdges = false
 
-    if (currentSnapshot) {
-      currentSnapshot.edges.forEach((edge: LayoutEdge) => {
-        const source = nodeVisuals.get(edge.sourceId)
-        const target = nodeVisuals.get(edge.targetId)
+    currentSnapshot.edges.forEach((edge: LayoutEdge) => {
+      const source = nodeVisuals.get(edge.sourceId)
+      const target = nodeVisuals.get(edge.targetId)
 
-        if (!source || !target) {
-          return
-        }
-
-        edgeLayer
-          .moveTo(source.displayX, source.displayY)
-          .lineTo(target.displayX, target.displayY)
-        hasActiveEdges = true
-      })
-
-      if (hasActiveEdges) {
-        edgeLayer.stroke({ color: 0x90c3ff, width: 1.8, alpha: 0.18 })
+      if (!source || !target) {
+        return
       }
+
+      const edgePadding = Math.max(source.data.visualRadius, target.data.visualRadius) + 28
+
+      if (
+        !segmentBoundsOverlap(
+          currentViewBounds,
+          source.displayX,
+          source.displayY,
+          target.displayX,
+          target.displayY,
+          edgePadding,
+        )
+      ) {
+        return
+      }
+
+      edgeLayer
+        .moveTo(source.displayX, source.displayY)
+        .lineTo(target.displayX, target.displayY)
+      hasActiveEdges = true
+    })
+
+    if (hasActiveEdges) {
+      edgeLayer.stroke({ color: 0x90c3ff, width: 1.8, alpha: 0.18 })
     }
 
     let hasExitingEdges = false
@@ -870,6 +877,21 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
         return
       }
 
+      const edgePadding = Math.max(parent.data.visualRadius, visual.data.visualRadius) + 28
+
+      if (
+        !segmentBoundsOverlap(
+          currentViewBounds,
+          parent.displayX,
+          parent.displayY,
+          visual.displayX,
+          visual.displayY,
+          edgePadding,
+        )
+      ) {
+        return
+      }
+
       edgeLayer
         .moveTo(parent.displayX, parent.displayY)
         .lineTo(visual.displayX, visual.displayY)
@@ -878,6 +900,266 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
 
     if (hasExitingEdges) {
       edgeLayer.stroke({ color: 0x90c3ff, width: 1.6, alpha: 0.12 })
+    }
+  }
+
+  const syncSnapshot = (snapshot: LayoutSnapshot) => {
+    const applyHardReset = hardResetPending
+    hardResetPending = false
+
+    if (applyHardReset) {
+      edgeLayer.clear()
+      activeNodeIds.clear()
+      nodeVisuals.forEach((visual) => {
+        nodeLayer.removeChild(visual.container)
+        visual.container.destroy({ children: true })
+      })
+      nodeVisuals.clear()
+      didAutoFit = false
+    }
+
+    currentSnapshot = snapshot
+    publishHudSnapshot()
+
+    const now = performance.now()
+    const activeIds = new Set(snapshot.nodes.map((node) => node.id))
+
+    snapshot.nodes.forEach((node) => {
+      const existing = nodeVisuals.get(node.id)
+      const appearanceKey = getNodeAppearanceKey(node)
+
+      if (!existing) {
+        const visual = createNodeVisual(node)
+        const parentVisual = node.parentId ? nodeVisuals.get(node.parentId) : null
+        const originX = applyHardReset ? node.x : parentVisual ? parentVisual.displayX : node.x
+        const originY = applyHardReset ? node.y : parentVisual ? parentVisual.displayY : node.y
+
+        visual.data = node
+        visual.displayX = originX
+        visual.displayY = originY
+        visual.entryOriginX = originX
+        visual.entryOriginY = originY
+        visual.targetX = node.x
+        visual.targetY = node.y
+        visual.phase = applyHardReset ? 'steady' : 'entering'
+        visual.phaseStartedAt = now
+        visual.container.alpha = applyHardReset ? 1 : 0
+        visual.container.scale.set(applyHardReset ? 1 : 0)
+        visual.container.position.set(originX, originY)
+        drawNode(visual)
+        nodeLayer.addChild(visual.container)
+        nodeVisuals.set(node.id, visual)
+
+        if (!applyHardReset) {
+          activeNodeIds.add(node.id)
+        }
+        return
+      }
+
+      const targetChanged =
+        Math.abs(existing.targetX - node.x) > 0.01 ||
+        Math.abs(existing.targetY - node.y) > 0.01
+
+      existing.data = node
+      existing.targetX = node.x
+      existing.targetY = node.y
+      existing.exitParentId = node.parentId
+
+      if (existing.phase === 'exiting') {
+        existing.phase = 'entering'
+        existing.phaseStartedAt = now
+        existing.entryOriginX = existing.displayX
+        existing.entryOriginY = existing.displayY
+        activeNodeIds.add(node.id)
+      }
+
+      if (existing.appearanceKey !== appearanceKey) {
+        drawNode(existing)
+      }
+
+      if (targetChanged || existing.phase !== 'steady') {
+        activeNodeIds.add(node.id)
+      }
+    })
+
+    nodeVisuals.forEach((visual, id) => {
+      if (activeIds.has(id) || visual.phase === 'exiting') {
+        return
+      }
+
+      visual.phase = 'exiting'
+      visual.phaseStartedAt = now
+      visual.exitOriginX = visual.displayX
+      visual.exitOriginY = visual.displayY
+      activeNodeIds.add(id)
+    })
+
+    if (refitAfterViewportRefresh) {
+      refitAfterViewportRefresh = false
+      fitSceneToSnapshot(sceneContainer, snapshot, app.screen.width, app.screen.height)
+    }
+
+    if (!didAutoFit && currentSnapshot) {
+      didAutoFit = true
+      fitSceneToSnapshot(sceneContainer, currentSnapshot, app.screen.width, app.screen.height)
+    }
+
+    cullingDirty = true
+    edgeGeometryDirty = true
+    app.render()
+  }
+
+  const unsubscribeLayout = layoutEngine.subscribe(syncSnapshot)
+  const unsubscribeFit = layoutEngine.onFitRequested(() => {
+    if (!currentSnapshot) {
+      return
+    }
+
+    fitSceneToSnapshot(sceneContainer, currentSnapshot, app.screen.width, app.screen.height)
+  })
+
+  app.ticker.add(() => {
+    const now = performance.now()
+    const sceneX = sceneContainer.position.x
+    const sceneY = sceneContainer.position.y
+    const sceneScale = sceneContainer.scale.x
+    const cameraChanged =
+      Math.abs(sceneX - lastSceneX) > 0.01 ||
+      Math.abs(sceneY - lastSceneY) > 0.01 ||
+      Math.abs(sceneScale - lastSceneScale) > 0.0005
+
+    if (cameraChanged) {
+      lastSceneX = sceneX
+      lastSceneY = sceneY
+      lastSceneScale = sceneScale
+      currentScale = sceneScale
+      cullingDirty = true
+      edgeGeometryDirty = true
+      publishHudSnapshot()
+    }
+
+    if (now - lastFpsSampleAt >= 250) {
+      lastFpsSampleAt = now
+      currentFps = Math.max(0, Math.round(app.ticker.FPS))
+      publishHudSnapshot()
+    }
+
+    for (const id of Array.from(activeNodeIds)) {
+      const visual = nodeVisuals.get(id)
+
+      if (!visual) {
+        activeNodeIds.delete(id)
+        continue
+      }
+
+      let shouldStayActive = false
+      let positionChanged = false
+
+      if (visual.phase === 'entering') {
+        const progress = clamp((now - visual.phaseStartedAt) / ENTER_EXIT_DURATION, 0, 1)
+        const eased = easeOutCubic(progress)
+
+        visual.displayX = visual.entryOriginX + (visual.targetX - visual.entryOriginX) * eased
+        visual.displayY = visual.entryOriginY + (visual.targetY - visual.entryOriginY) * eased
+        visual.velocityX = 0
+        visual.velocityY = 0
+        visual.container.alpha = eased
+        visual.container.scale.set(eased)
+        positionChanged = true
+
+        if (progress >= 1) {
+          visual.phase = 'steady'
+          visual.container.alpha = 1
+          visual.container.scale.set(1)
+        } else {
+          shouldStayActive = true
+        }
+      } else if (visual.phase === 'exiting') {
+        const progress = clamp((now - visual.phaseStartedAt) / ENTER_EXIT_DURATION, 0, 1)
+        const eased = easeOutCubic(progress)
+        const parentVisual = visual.exitParentId ? nodeVisuals.get(visual.exitParentId) : null
+        const exitTargetX = parentVisual ? parentVisual.displayX : visual.targetX
+        const exitTargetY = parentVisual ? parentVisual.displayY : visual.targetY
+
+        visual.displayX = visual.exitOriginX + (exitTargetX - visual.exitOriginX) * eased
+        visual.displayY = visual.exitOriginY + (exitTargetY - visual.exitOriginY) * eased
+        visual.velocityX = 0
+        visual.velocityY = 0
+        visual.container.alpha = 1 - eased
+        visual.container.scale.set(1 - eased)
+        positionChanged = true
+
+        if (progress >= 1) {
+          nodeLayer.removeChild(visual.container)
+          visual.container.destroy({ children: true })
+          nodeVisuals.delete(id)
+          activeNodeIds.delete(id)
+          cullingDirty = true
+          edgeGeometryDirty = true
+          return
+        } else {
+          shouldStayActive = true
+        }
+      } else {
+        if (dragNodeId === id) {
+          visual.velocityX = 0
+          visual.velocityY = 0
+          visual.container.alpha = 1
+          visual.container.scale.set(1)
+          visual.container.position.set(visual.displayX, visual.displayY)
+          shouldStayActive = true
+          positionChanged = true
+        } else {
+          const deltaX = visual.targetX - visual.displayX
+          const deltaY = visual.targetY - visual.displayY
+
+          if (
+            Math.abs(deltaX) <= NODE_SETTLE_DISTANCE &&
+            Math.abs(deltaY) <= NODE_SETTLE_DISTANCE &&
+            Math.abs(visual.velocityX) <= NODE_SETTLE_VELOCITY &&
+            Math.abs(visual.velocityY) <= NODE_SETTLE_VELOCITY
+          ) {
+            visual.displayX = visual.targetX
+            visual.displayY = visual.targetY
+            visual.velocityX = 0
+            visual.velocityY = 0
+            visual.container.alpha = 1
+            visual.container.scale.set(1)
+          } else {
+            visual.velocityX =
+              (visual.velocityX + deltaX * NODE_SPRING_STRENGTH) * NODE_SPRING_DAMPING
+            visual.velocityY =
+              (visual.velocityY + deltaY * NODE_SPRING_STRENGTH) * NODE_SPRING_DAMPING
+            visual.displayX += visual.velocityX
+            visual.displayY += visual.velocityY
+            visual.container.alpha = 1
+            visual.container.scale.set(1)
+            shouldStayActive = true
+            positionChanged = true
+          }
+        }
+      }
+
+      visual.container.position.set(visual.displayX, visual.displayY)
+
+      if (positionChanged) {
+        cullingDirty = true
+        edgeGeometryDirty = true
+      }
+
+      if (shouldStayActive) {
+        activeNodeIds.add(id)
+      } else {
+        activeNodeIds.delete(id)
+      }
+    }
+
+    if (cullingDirty) {
+      syncViewCulling()
+    }
+
+    if (edgeGeometryDirty) {
+      redrawEdges()
     }
   })
 
