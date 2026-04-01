@@ -19,7 +19,6 @@ import {
   type LayoutEdge,
   type LayoutNode,
   type LayoutSnapshot,
-  type LayoutSolverMode,
 } from '../engine/layoutEngine'
 import { createGraphStore } from '../store/graphStore'
 
@@ -29,7 +28,6 @@ const ENTER_EXIT_DURATION = 400
 const NODE_SPRING_STRENGTH = 0.12
 const NODE_SPRING_DAMPING = 0.74
 const NODE_DRAG_THRESHOLD = 6
-const EDGE_RENDER_THRESHOLD = 900
 const NODE_FONT_FAMILY = '"JetBrains Mono", Consolas, "Courier New", monospace'
 const TEXT_RESOLUTION =
   typeof window === 'undefined'
@@ -70,7 +68,6 @@ export interface PixiRendererHandle {
   destroy: () => void
   subscribe: (listener: (snapshot: RendererHudSnapshot) => void) => () => void
   updateGraphSettings: (settings: ExampleGraphSettings) => void
-  updateSolverMode: (mode: LayoutSolverMode) => void
   expandAll: () => void
   collapseAll: () => void
   fitToScreen: () => void
@@ -79,7 +76,6 @@ export interface PixiRendererHandle {
 export interface RendererHudSnapshot {
   visibleCount: number
   totalCount: number
-  solverMode: LayoutSolverMode
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -329,7 +325,6 @@ function toHudSnapshot(snapshot: LayoutSnapshot): RendererHudSnapshot {
   return {
     visibleCount: snapshot.visibleCount,
     totalCount: snapshot.totalCount,
-    solverMode: snapshot.solverMode,
   }
 }
 
@@ -668,8 +663,7 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
     const hudChanged =
       !currentHudSnapshot ||
       hudSnapshot.visibleCount !== currentHudSnapshot.visibleCount ||
-      hudSnapshot.totalCount !== currentHudSnapshot.totalCount ||
-      hudSnapshot.solverMode !== currentHudSnapshot.solverMode
+      hudSnapshot.totalCount !== currentHudSnapshot.totalCount
 
     currentHudSnapshot = hudSnapshot
 
@@ -823,8 +817,9 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
     })
 
     edgeLayer.clear()
+    let hasActiveEdges = false
 
-    if (currentSnapshot && currentSnapshot.edges.length <= EDGE_RENDER_THRESHOLD) {
+    if (currentSnapshot) {
       currentSnapshot.edges.forEach((edge: LayoutEdge) => {
         const source = nodeVisuals.get(edge.sourceId)
         const target = nodeVisuals.get(edge.targetId)
@@ -836,9 +831,15 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
         edgeLayer
           .moveTo(source.displayX, source.displayY)
           .lineTo(target.displayX, target.displayY)
-          .stroke({ color: 0x90c3ff, width: 1.8, alpha: 0.18 })
+        hasActiveEdges = true
       })
+
+      if (hasActiveEdges) {
+        edgeLayer.stroke({ color: 0x90c3ff, width: 1.8, alpha: 0.18 })
+      }
     }
+
+    let hasExitingEdges = false
 
     nodeVisuals.forEach((visual) => {
       if (visual.phase !== 'exiting' || !visual.exitParentId) {
@@ -854,8 +855,12 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
       edgeLayer
         .moveTo(parent.displayX, parent.displayY)
         .lineTo(visual.displayX, visual.displayY)
-        .stroke({ color: 0x90c3ff, width: 1.6, alpha: 0.12 })
+      hasExitingEdges = true
     })
+
+    if (hasExitingEdges) {
+      edgeLayer.stroke({ color: 0x90c3ff, width: 1.6, alpha: 0.12 })
+    }
   })
 
   app.render()
@@ -874,9 +879,6 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
     },
     updateGraphSettings: (settings) => {
       rebuildGraph(settings)
-    },
-    updateSolverMode: (mode) => {
-      layoutEngine.updateSolverMode(mode)
     },
     expandAll: () => {
       graphStore.expandAll()

@@ -29,12 +29,12 @@ interface MutableBranch {
 }
 
 export const DEFAULT_EXAMPLE_ROOT_COUNT = 4
-export const MAX_EXAMPLE_ROOT_COUNT = 6
+export const MAX_EXAMPLE_ROOT_COUNT = 100
 export const MIN_EXAMPLE_ROOT_COUNT = 1
 export const DEFAULT_EXAMPLE_DEPTH = 3
 export const MAX_EXAMPLE_DEPTH = 5
 export const MIN_EXAMPLE_DEPTH = 1
-export const DEFAULT_CHILD_MIN_COUNT = 3
+export const DEFAULT_CHILD_MIN_COUNT = 1
 export const DEFAULT_CHILD_MAX_COUNT = 5
 export const MIN_CHILD_COUNT = 0
 export const MAX_CHILD_COUNT = 5

@@ -4,7 +4,6 @@ import {
   normalizeExampleGraphSettings,
   type ExampleGraphSettings,
 } from './data/exampleGraph'
-import type { LayoutSolverMode } from './engine/layoutEngine'
 import {
   initPixiRenderer,
   type PixiRendererHandle,
@@ -23,7 +22,6 @@ function getInitialGizmoOpen() {
 const INITIAL_HUD_SNAPSHOT: RendererHudSnapshot = {
   visibleCount: 0,
   totalCount: 0,
-  solverMode: 'cola',
 }
 
 function areGraphSettingsEqual(left: ExampleGraphSettings, right: ExampleGraphSettings) {
@@ -39,7 +37,6 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const rendererRef = useRef<PixiRendererHandle | null>(null)
   const graphSettingsRef = useRef<ExampleGraphSettings>(DEFAULT_EXAMPLE_GRAPH_SETTINGS)
-  const solverModeRef = useRef<LayoutSolverMode>('cola')
   const [gizmoOpen, setGizmoOpen] = useState(getInitialGizmoOpen)
   const [graphSettings, setGraphSettings] = useState<ExampleGraphSettings>(
     DEFAULT_EXAMPLE_GRAPH_SETTINGS,
@@ -65,11 +62,9 @@ function App() {
 
       rendererRef.current = nextHandle
       unsubscribe = nextHandle.subscribe((snapshot) => {
-        solverModeRef.current = snapshot.solverMode
         setHudSnapshot(snapshot)
       })
       nextHandle.updateGraphSettings(graphSettingsRef.current)
-      nextHandle.updateSolverMode(solverModeRef.current)
     })
 
     return () => {
@@ -121,7 +116,6 @@ function App() {
       <GizmoPanel
         open={gizmoOpen}
         graphSettings={graphSettings}
-        solverMode={hudSnapshot.solverMode}
         stats={hudSnapshot}
         onToggle={() => setGizmoOpen((current) => !current)}
         onRootCountChange={(value) => {
@@ -149,14 +143,6 @@ function App() {
             childMinCount: Math.min(current.childMinCount, value),
             childMaxCount: value,
           }))
-        }}
-        onSolverModeChange={(value) => {
-          solverModeRef.current = value
-          setHudSnapshot((current) => ({
-            ...current,
-            solverMode: value,
-          }))
-          rendererRef.current?.updateSolverMode(value)
         }}
         onExpandAll={() => rendererRef.current?.expandAll()}
         onCollapseAll={() => rendererRef.current?.collapseAll()}

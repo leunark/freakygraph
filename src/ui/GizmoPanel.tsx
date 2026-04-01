@@ -8,20 +8,17 @@ import {
   MIN_EXAMPLE_ROOT_COUNT,
   type ExampleGraphSettings,
 } from '../data/exampleGraph'
-import type { LayoutSolverMode } from '../engine/layoutEngine'
 import type { RendererHudSnapshot } from '../renderer/pixiRenderer'
 
 interface GizmoPanelProps {
   open: boolean
   graphSettings: ExampleGraphSettings
-  solverMode: LayoutSolverMode
   stats: RendererHudSnapshot
   onToggle: () => void
   onRootCountChange: (value: number) => void
   onDepthChange: (value: number) => void
   onChildMinChange: (value: number) => void
   onChildMaxChange: (value: number) => void
-  onSolverModeChange: (value: LayoutSolverMode) => void
   onExpandAll: () => void
   onCollapseAll: () => void
   onFitToScreen: () => void
@@ -35,12 +32,6 @@ interface RangeFieldProps {
   value: number
   onChange: (value: number) => void
 }
-
-const SOLVER_OPTIONS: Array<{ label: string; value: LayoutSolverMode }> = [
-  { label: 'WebCola', value: 'cola' },
-  { label: 'WebCola Lite', value: 'cola-lite' },
-  { label: 'Seed Only', value: 'seed' },
-]
 
 function RangeField({ id, label, min, max, value, onChange }: RangeFieldProps) {
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -73,14 +64,12 @@ function RangeField({ id, label, min, max, value, onChange }: RangeFieldProps) {
 export function GizmoPanel({
   open,
   graphSettings,
-  solverMode,
   stats,
   onToggle,
   onRootCountChange,
   onDepthChange,
   onChildMinChange,
   onChildMaxChange,
-  onSolverModeChange,
   onExpandAll,
   onCollapseAll,
   onFitToScreen,
@@ -179,31 +168,6 @@ export function GizmoPanel({
             </div>
           </section>
 
-          <section className="gizmo-section">
-            <div className="gizmo-section-header">
-              <h2>Solver</h2>
-            </div>
-            <label className="gizmo-control" htmlFor="solver-mode">
-              <span className="gizmo-control-row">
-                <span>Mode</span>
-                <output htmlFor="solver-mode">
-                  {SOLVER_OPTIONS.find((option) => option.value === solverMode)?.label ?? solverMode}
-                </output>
-              </span>
-              <select
-                id="solver-mode"
-                className="gizmo-select"
-                value={solverMode}
-                onChange={(event) => onSolverModeChange(event.target.value as LayoutSolverMode)}
-              >
-                {SOLVER_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </section>
         </aside>
       ) : null}
     </div>

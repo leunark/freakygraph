@@ -17,26 +17,34 @@ Production build:
 npm run build
 ```
 
-## Layout Approach
+## Current Layout
 
-The graph only lays out what is currently visible. Hidden branches are excluded from the solve, which keeps the active problem much smaller and avoids paying layout cost for content the user cannot see.
+FreakyGraph now uses a custom deterministic orbit layout. There is no force solver and no WebCola dependency anymore.
 
-Each visible node represents more than its drawn circle. It also carries an estimated footprint for the visible subtree beneath it. In practice, that means large expanded branches reserve more space than collapsed ones, so the solver separates subtrees based on what they visually occupy rather than just the center points of nodes.
+The engine only lays out what is currently visible. Hidden branches are excluded from the active layout problem, which keeps expand and collapse interactions fast even at larger depths.
 
-Before the layout is refined, the graph is seeded with deterministic positions. That seed preserves a consistent directional structure, so repeated interactions do not cause the whole scene to rotate or reshuffle unnecessarily. A constrained solve then adjusts those positions to reduce overlap while keeping related nodes connected.
+Each node carries two spatial estimates:
+- `boxRadius`: the local body of the node and its immediate branch.
+- `footprintRadius`: the full visible subtree size that has to stay clear of sibling subtrees.
 
-## Why This Works Well
+Children orbit around their parent on a full 360 degree ring. If sibling subtrees would collide, the ring radius expands. If there is spare circumference, the extra space is distributed evenly around the ring so siblings stay balanced instead of bunching into one direction.
 
-This approach is fast because it solves only the visible graph and reduces each subtree to a compact spatial estimate instead of trying to model every overlap relationship explicitly.
+Root families are laid out independently first, then packed apart afterward using their measured bounding boxes. That means one root family never influences the internal structure of another.
 
-It is stable because the layout starts from a predictable seed rather than a random or unconstrained force simulation. That helps preserve the user's mental map when expanding or collapsing branches.
+## Why This Works Better
 
-It is a good fit for interactive trees because it balances structure and flexibility: families stay grouped, larger branches make room for themselves, and the whole scene can still adapt when visibility changes.
+- It is faster because there is no iterative physics solve during expand or collapse.
+- It is easier to read because parent-child relationships stay explicit and radial.
+- It is more stable because the same visible tree always produces the same structure.
+- It matches the graph shape better because subtree size affects required ring space directly.
 
 ## Tradeoffs
 
-The subtree footprint is a heuristic, not exact packing. That means layout quality depends on the estimate being good enough rather than mathematically perfect.
+- The subtree footprint is still a heuristic. It is deliberately simple and fast, not a mathematically optimal packing.
+- Root families are packed as rectangular bounds after their internal orbit layout is finished, so inter-family packing is approximate rather than exact.
+- The current tuning is optimized for clarity and responsiveness, not minimum area.
 
-The solver improves readability and separation, but it does not guarantee an optimal layout. The design favors responsiveness and consistency over finding the globally best arrangement.
+## Documentation
 
-Compared with a generic full-graph force layout, this is usually more stable and more efficient for expandable trees. Compared with a custom recursive packing algorithm, it is easier to tune and extend, but less exact.
+- Exact algorithm and implementation notes: [docs/layout-algorithm.md](docs/layout-algorithm.md)
+- Main engine implementation: `src/engine/layoutEngine.ts`

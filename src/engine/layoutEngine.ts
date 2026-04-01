@@ -1,16 +1,10 @@
-import { EventType, adaptor, type InputNode, type Link } from 'webcola'
 import { type GraphNodeRecord } from '../data/exampleGraph'
 import { GraphStore, type GraphStoreSnapshot } from '../store/graphStore'
 
 const NODE_RADIUS = 30
 const COLLAPSED_RADIUS = NODE_RADIUS + 16
 const COLLISION_PADDING = 14
-const DEFAULT_EDGE_SETTINGS = {
-  minLength: 20,
-  parentOrbitFactor: 0.08,
-  childFootprintFactor: 0.04,
-  nodeBaseLength: 0,
-} as const
+const SUBTREE_ORBIT_INFLUENCE = 0.38
 const DEFAULT_LAYOUT_SETTINGS = {
   siblingGap: 0,
   branchPadding: 0,
@@ -21,7 +15,12 @@ const DEFAULT_LAYOUT_SETTINGS = {
 type LayoutListener = (snapshot: LayoutSnapshot) => void
 type FitListener = () => void
 
-export type LayoutSolverMode = 'cola' | 'cola-lite' | 'seed'
+interface LayoutSettings {
+  siblingGap: number
+  branchPadding: number
+  rootGap: number
+  subtreeScale: number
+}
 
 interface VisibleNodeState {
   id: string
@@ -33,41 +32,25 @@ interface VisibleNodeState {
   footprintRadius: number
   initialX: number
   initialY: number
-  angle: number
 }
 
-interface ColaNode extends InputNode {
+interface PositionedNode {
   id: string
   x: number
   y: number
-  width: number
-  height: number
 }
 
-interface ColaLink extends Link<number> {
-  id: string
-  length: number
+interface ChildOrbitLayout {
+  orbitRadius: number
+  slotArcWidths: number[]
+  gapArc: number
+  maxChildInfluenceRadius: number
+  maxChildFootprintRadius: number
 }
 
-interface ColaLayout {
-  nodes(nodes: ColaNode[]): this
-  links(links: ColaLink[]): this
-  avoidOverlaps(value: boolean): this
-  handleDisconnected(value: boolean): this
-  size(size: [number, number]): this
-  convergenceThreshold(value: number): this
-  linkDistance(distance: (link: ColaLink) => number): this
-  on(eventType: EventType, listener: () => void): this
-  start(
-    initialUnconstrainedIterations?: number,
-    initialUserConstraintIterations?: number,
-    initialAllConstraintIterations?: number,
-    gridSnapIterations?: number,
-    keepRunning?: boolean,
-    centerGraph?: boolean,
-  ): this
-  stop(): this
-  tick(): boolean
+interface FamilyLayout {
+  rootId: string
+  nodes: PositionedNode[]
 }
 
 export interface LayoutNode {
@@ -110,67 +93,32 @@ export interface LayoutSnapshot {
   bounds: LayoutBounds
   maxDepth: number
   maxSupportedDepth: number
-  solverMode: LayoutSolverMode
-  edgeSettings: EdgeLengthSettings
-  layoutSettings: LayoutSettings
-}
-
-export interface EdgeLengthSettings {
-  minLength: number
-  parentOrbitFactor: number
-  childFootprintFactor: number
-  nodeBaseLength: number
-}
-
-export interface EdgeLengthSettingBounds {
-  minLength: { min: number; max: number; step: number }
-  parentOrbitFactor: { min: number; max: number; step: number }
-  childFootprintFactor: { min: number; max: number; step: number }
-  nodeBaseLength: { min: number; max: number; step: number }
-}
-
-export interface LayoutSettings {
-  siblingGap: number
-  branchPadding: number
-  rootGap: number
-  subtreeScale: number
-}
-
-export interface LayoutSettingBounds {
-  siblingGap: { min: number; max: number; step: number }
-  branchPadding: { min: number; max: number; step: number }
-  rootGap: { min: number; max: number; step: number }
-  subtreeScale: { min: number; max: number; step: number }
-}
-
-const EDGE_SETTING_BOUNDS: EdgeLengthSettingBounds = {
-  minLength: { min: 20, max: 260, step: 5 },
-  parentOrbitFactor: { min: 0.08, max: 1.8, step: 0.02 },
-  childFootprintFactor: { min: 0.04, max: 1.4, step: 0.02 },
-  nodeBaseLength: { min: 0, max: 120, step: 2 },
-}
-
-const LAYOUT_SETTING_BOUNDS: LayoutSettingBounds = {
-  siblingGap: { min: 0, max: 72, step: 2 },
-  branchPadding: { min: 0, max: 80, step: 2 },
-  rootGap: { min: 0, max: 140, step: 4 },
-  subtreeScale: { min: 0.35, max: 1.1, step: 0.01 },
 }
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
-function roundToStep(value: number, step: number) {
-  return Math.round(value / step) * step
-}
-
 function getVisualRadiusForDepth(depth: number) {
   return Math.max(15, NODE_RADIUS + 8 - depth * 3.5)
 }
 
-function getCollisionRadius(state: VisibleNodeState) {
-  return Math.max(state.boxRadius, state.footprintRadius + COLLISION_PADDING)
+function getOrbitInfluenceRadius(state: VisibleNodeState, subtreeScale: number) {
+  const scaledFootprint = Math.max(COLLAPSED_RADIUS, state.footprintRadius * subtreeScale)
+  const subtreeExtra = Math.max(0, scaledFootprint - state.boxRadius)
+
+  return state.boxRadius + subtreeExtra * SUBTREE_ORBIT_INFLUENCE
+}
+
+function createEmptyBounds(): LayoutBounds {
+  return {
+    minX: Number.POSITIVE_INFINITY,
+    minY: Number.POSITIVE_INFINITY,
+    maxX: Number.NEGATIVE_INFINITY,
+    maxY: Number.NEGATIVE_INFINITY,
+    width: 0,
+    height: 0,
+  }
 }
 
 export class GraphLayoutEngine {
@@ -178,14 +126,11 @@ export class GraphLayoutEngine {
   private readonly listeners = new Set<LayoutListener>()
   private readonly fitListeners = new Set<FitListener>()
   private unsubscribeFromStore: (() => void) | null = null
-  private activeLayout: { stop: () => void } | null = null
   private lastSnapshot: LayoutSnapshot | null = null
-  private runVersion = 0
+  private version = 0
   private viewportWidth = 1600
   private viewportHeight = 900
-  private solverMode: LayoutSolverMode = 'cola'
-  private edgeSettings: EdgeLengthSettings = { ...DEFAULT_EDGE_SETTINGS }
-  private layoutSettings: LayoutSettings = { ...DEFAULT_LAYOUT_SETTINGS }
+  private readonly layoutSettings: LayoutSettings = { ...DEFAULT_LAYOUT_SETTINGS }
 
   constructor(store: GraphStore) {
     this.store = store
@@ -222,139 +167,6 @@ export class GraphLayoutEngine {
     this.fitListeners.forEach((listener) => listener())
   }
 
-  getSnapshot() {
-    return this.lastSnapshot
-  }
-
-  getSolverMode() {
-    return this.solverMode
-  }
-
-  updateSolverMode(nextMode: LayoutSolverMode) {
-    if (nextMode === this.solverMode) {
-      return
-    }
-
-    this.solverMode = nextMode
-    this.relayout(this.store.getSnapshot())
-  }
-
-  getEdgeSettings() {
-    return { ...this.edgeSettings }
-  }
-
-  getEdgeSettingBounds() {
-    return EDGE_SETTING_BOUNDS
-  }
-
-  getLayoutSettings() {
-    return { ...this.layoutSettings }
-  }
-
-  getLayoutSettingBounds() {
-    return LAYOUT_SETTING_BOUNDS
-  }
-
-  updateEdgeSettings(nextSettings: Partial<EdgeLengthSettings>) {
-    const merged: EdgeLengthSettings = {
-      minLength: clamp(
-        roundToStep(
-          nextSettings.minLength ?? this.edgeSettings.minLength,
-          EDGE_SETTING_BOUNDS.minLength.step,
-        ),
-        EDGE_SETTING_BOUNDS.minLength.min,
-        EDGE_SETTING_BOUNDS.minLength.max,
-      ),
-      parentOrbitFactor: clamp(
-        roundToStep(
-          nextSettings.parentOrbitFactor ?? this.edgeSettings.parentOrbitFactor,
-          EDGE_SETTING_BOUNDS.parentOrbitFactor.step,
-        ),
-        EDGE_SETTING_BOUNDS.parentOrbitFactor.min,
-        EDGE_SETTING_BOUNDS.parentOrbitFactor.max,
-      ),
-      childFootprintFactor: clamp(
-        roundToStep(
-          nextSettings.childFootprintFactor ?? this.edgeSettings.childFootprintFactor,
-          EDGE_SETTING_BOUNDS.childFootprintFactor.step,
-        ),
-        EDGE_SETTING_BOUNDS.childFootprintFactor.min,
-        EDGE_SETTING_BOUNDS.childFootprintFactor.max,
-      ),
-      nodeBaseLength: clamp(
-        roundToStep(
-          nextSettings.nodeBaseLength ?? this.edgeSettings.nodeBaseLength,
-          EDGE_SETTING_BOUNDS.nodeBaseLength.step,
-        ),
-        EDGE_SETTING_BOUNDS.nodeBaseLength.min,
-        EDGE_SETTING_BOUNDS.nodeBaseLength.max,
-      ),
-    }
-
-    const changed =
-      merged.minLength !== this.edgeSettings.minLength ||
-      merged.parentOrbitFactor !== this.edgeSettings.parentOrbitFactor ||
-      merged.childFootprintFactor !== this.edgeSettings.childFootprintFactor ||
-      merged.nodeBaseLength !== this.edgeSettings.nodeBaseLength
-
-    if (!changed) {
-      return
-    }
-
-    this.edgeSettings = merged
-    this.relayout(this.store.getSnapshot())
-  }
-
-  updateLayoutSettings(nextSettings: Partial<LayoutSettings>) {
-    const merged: LayoutSettings = {
-      siblingGap: clamp(
-        roundToStep(
-          nextSettings.siblingGap ?? this.layoutSettings.siblingGap,
-          LAYOUT_SETTING_BOUNDS.siblingGap.step,
-        ),
-        LAYOUT_SETTING_BOUNDS.siblingGap.min,
-        LAYOUT_SETTING_BOUNDS.siblingGap.max,
-      ),
-      branchPadding: clamp(
-        roundToStep(
-          nextSettings.branchPadding ?? this.layoutSettings.branchPadding,
-          LAYOUT_SETTING_BOUNDS.branchPadding.step,
-        ),
-        LAYOUT_SETTING_BOUNDS.branchPadding.min,
-        LAYOUT_SETTING_BOUNDS.branchPadding.max,
-      ),
-      rootGap: clamp(
-        roundToStep(
-          nextSettings.rootGap ?? this.layoutSettings.rootGap,
-          LAYOUT_SETTING_BOUNDS.rootGap.step,
-        ),
-        LAYOUT_SETTING_BOUNDS.rootGap.min,
-        LAYOUT_SETTING_BOUNDS.rootGap.max,
-      ),
-      subtreeScale: clamp(
-        roundToStep(
-          nextSettings.subtreeScale ?? this.layoutSettings.subtreeScale,
-          LAYOUT_SETTING_BOUNDS.subtreeScale.step,
-        ),
-        LAYOUT_SETTING_BOUNDS.subtreeScale.min,
-        LAYOUT_SETTING_BOUNDS.subtreeScale.max,
-      ),
-    }
-
-    const changed =
-      merged.siblingGap !== this.layoutSettings.siblingGap ||
-      merged.branchPadding !== this.layoutSettings.branchPadding ||
-      merged.rootGap !== this.layoutSettings.rootGap ||
-      merged.subtreeScale !== this.layoutSettings.subtreeScale
-
-    if (!changed) {
-      return
-    }
-
-    this.layoutSettings = merged
-    this.relayout(this.store.getSnapshot())
-  }
-
   setViewportSize(width: number, height: number) {
     this.viewportWidth = Math.max(1, width)
     this.viewportHeight = Math.max(1, height)
@@ -365,8 +177,6 @@ export class GraphLayoutEngine {
   }
 
   destroy() {
-    this.activeLayout?.stop()
-    this.activeLayout = null
     this.unsubscribeFromStore?.()
     this.unsubscribeFromStore = null
     this.listeners.clear()
@@ -374,134 +184,25 @@ export class GraphLayoutEngine {
   }
 
   private relayout(storeSnapshot: GraphStoreSnapshot) {
-    this.runVersion += 1
-    const layoutVersion = this.runVersion
-
-    this.activeLayout?.stop()
-    this.activeLayout = null
-
     const visibleStates = this.buildVisibleState(storeSnapshot)
-    const visibleIds = Array.from(visibleStates.keys())
+
+    if (visibleStates.size === 0) {
+      return
+    }
+
     const edges = this.buildEdges(visibleStates)
+    const families = this.graph.roots
+      .filter((rootId) => visibleStates.has(rootId))
+      .map((rootId) => this.buildFamilyLayout(rootId, visibleStates))
 
-    if (visibleIds.length === 0) {
-      return
-    }
-
-    const rootIds = this.graph.roots.filter((rootId) => visibleStates.has(rootId))
-    this.placeRoots(rootIds, visibleStates)
-
-    const colaNodes = visibleIds.map((id, index) => {
-      const state = visibleStates.get(id)!
-      const collisionRadius = getCollisionRadius(state)
-
-      return {
-        id,
-        index,
-        x: state.initialX,
-        y: state.initialY,
-        width: collisionRadius * 2,
-        height: collisionRadius * 2,
-      } satisfies ColaNode
-    })
-
-    const nodeIndexById = new Map(colaNodes.map((node) => [node.id, node.index!] as const))
-    const colaLinks = edges.map((edge) => {
-      const parentState = visibleStates.get(edge.sourceId)!
-      const childState = visibleStates.get(edge.targetId)!
-
-      return {
-        id: edge.id,
-        source: nodeIndexById.get(edge.sourceId)!,
-        target: nodeIndexById.get(edge.targetId)!,
-        length: Math.max(
-          this.edgeSettings.minLength,
-          parentState.orbitRadius * this.edgeSettings.parentOrbitFactor +
-            (childState.boxRadius * 0.6 + childState.footprintRadius * 0.4) *
-              this.edgeSettings.childFootprintFactor +
-            this.edgeSettings.nodeBaseLength,
-        ),
-      } satisfies ColaLink
-    })
-
-    const denseLayout = this.solverMode === 'cola-lite'
-    const seedOnlyLayout = this.solverMode === 'seed'
-
-    if (colaNodes.length === 1 || seedOnlyLayout) {
-      this.publishSnapshot(layoutVersion, colaNodes, visibleStates, edges, storeSnapshot)
-      return
-    }
-
-    let frameId = 0
-    let tickPublishCount = 0
-
-    const layout = adaptor({
-      kick: () => {
-        const advance = () => {
-          if (layoutVersion !== this.runVersion) {
-            return
-          }
-
-          const done = layout.tick()
-
-          if (!done) {
-            frameId = window.requestAnimationFrame(advance)
-          }
-        }
-
-        frameId = window.requestAnimationFrame(advance)
-      },
-    }) as unknown as ColaLayout
-
-    const publish = () => {
-      if (layoutVersion !== this.runVersion) {
-        return
-      }
-
-      this.publishSnapshot(layoutVersion, colaNodes, visibleStates, edges, storeSnapshot)
-    }
-
-    layout.on(EventType.tick, () => {
-      if (!denseLayout) {
-        publish()
-        return
-      }
-
-      tickPublishCount += 1
-
-      if (tickPublishCount % 3 === 0) {
-        publish()
-      }
-    })
-    layout.on(EventType.end, publish)
-    layout
-      .nodes(colaNodes)
-      .links(colaLinks)
-      .avoidOverlaps(true)
-      .handleDisconnected(true)
-      .size([
-        Math.max(this.viewportWidth * 1.6, this.estimateCanvasWidth(visibleStates)),
-        Math.max(this.viewportHeight * 1.6, this.estimateCanvasHeight(visibleStates)),
-      ])
-      .convergenceThreshold(denseLayout ? 0.34 : 0.14)
-      .linkDistance((link) => link.length)
-      .start(
-        denseLayout ? 10 : 24,
-        denseLayout ? 8 : 20,
-        denseLayout ? 12 : 28,
-        0,
-        true,
-        false,
-      )
-
-    publish()
-
-    this.activeLayout = {
-      stop: () => {
-        window.cancelAnimationFrame(frameId)
-        layout.stop()
-      },
-    }
+    this.version += 1
+    this.publishPackedSnapshot(
+      this.version,
+      families,
+      visibleStates,
+      edges,
+      storeSnapshot,
+    )
   }
 
   private buildVisibleState(storeSnapshot: GraphStoreSnapshot) {
@@ -525,7 +226,6 @@ export class GraphLayoutEngine {
         footprintRadius: COLLAPSED_RADIUS,
         initialX: 0,
         initialY: 0,
-        angle: Math.PI / 2,
       }
 
       visibleStates.set(nodeId, state)
@@ -536,33 +236,19 @@ export class GraphLayoutEngine {
       }
 
       const childStates = visibleChildren.map((childId) => visibleStates.get(childId)!)
-      const spread = this.getChildSpread(visibleChildren.length)
-      const scaledChildRadii = childStates.map((child) =>
-        Math.max(COLLAPSED_RADIUS, child.footprintRadius * this.layoutSettings.subtreeScale),
-      )
-      const maxChildRadius = Math.max(...scaledChildRadii)
-      const arcDemand = childStates.reduce(
-        (sum, child) =>
-          sum +
-          Math.max(COLLAPSED_RADIUS, child.footprintRadius * this.layoutSettings.subtreeScale) *
-            1.35 +
-          this.layoutSettings.siblingGap,
-        0,
-      )
-      const orbitRadius = Math.max(
-        NODE_RADIUS + maxChildRadius * 0.74 + this.layoutSettings.branchPadding,
-        arcDemand / Math.max(spread, Math.PI * 0.82),
-      )
+      const orbitLayout = this.getChildOrbitLayout(childStates)
 
-      state.orbitRadius = orbitRadius
+      state.orbitRadius = orbitLayout.orbitRadius
       state.boxRadius = Math.max(
         COLLAPSED_RADIUS,
-        orbitRadius * 0.2 + maxChildRadius * 0.42,
         NODE_RADIUS + 18,
+        NODE_RADIUS + orbitLayout.maxChildInfluenceRadius * 0.14,
       )
       state.footprintRadius = Math.max(
         state.boxRadius,
-        orbitRadius + maxChildRadius * 0.72 + this.layoutSettings.branchPadding * 0.5,
+        orbitLayout.orbitRadius +
+          orbitLayout.maxChildFootprintRadius +
+          this.layoutSettings.branchPadding * 0.25,
       )
     }
 
@@ -587,41 +273,115 @@ export class GraphLayoutEngine {
     return edges
   }
 
-  private placeRoots(rootIds: string[], visibleStates: Map<string, VisibleNodeState>) {
-    const maxRootFootprint = Math.max(
-      ...rootIds.map((rootId) => visibleStates.get(rootId)!.footprintRadius),
+  private buildFamilyLayout(
+    rootId: string,
+    visibleStates: Map<string, VisibleNodeState>,
+  ): FamilyLayout {
+    this.placeSubtree(rootId, 0, 0, -Math.PI / 2, visibleStates)
+
+    const nodes: PositionedNode[] = []
+
+    const visit = (nodeId: string) => {
+      const state = visibleStates.get(nodeId)!
+
+      nodes.push({
+        id: nodeId,
+        x: state.initialX,
+        y: state.initialY,
+      })
+
+      state.visibleChildren.forEach(visit)
+    }
+
+    visit(rootId)
+
+    return {
+      rootId,
+      nodes,
+    }
+  }
+
+  private getChildOrbitLayout(
+    childStates: VisibleNodeState[],
+    orbitRadiusOverride?: number,
+  ): ChildOrbitLayout {
+    const childCount = childStates.length
+
+    if (childCount === 0) {
+      return {
+        orbitRadius: 0,
+        slotArcWidths: [],
+        gapArc: 0,
+        maxChildInfluenceRadius: 0,
+        maxChildFootprintRadius: 0,
+      }
+    }
+
+    const childInfluenceRadii = childStates.map((child) =>
+      getOrbitInfluenceRadius(child, this.layoutSettings.subtreeScale),
     )
-    const columns = Math.max(1, Math.ceil(Math.sqrt(rootIds.length)))
-    const rows = Math.max(1, Math.ceil(rootIds.length / columns))
-    const cellWidth = maxRootFootprint * 2 + this.layoutSettings.rootGap
-    const cellHeight = maxRootFootprint * 2 + this.layoutSettings.rootGap
+    const maxChildInfluenceRadius = Math.max(...childInfluenceRadii)
+    const maxChildFootprintRadius = Math.max(
+      ...childStates.map((child) => child.footprintRadius),
+    )
+    const slotArcWidths = childStates.map((child) =>
+      Math.max(
+        COLLAPSED_RADIUS * 1.7,
+        child.footprintRadius * 2 + this.layoutSettings.branchPadding * 0.5,
+      ),
+    )
+    const minOrbitRadius =
+      NODE_RADIUS +
+      maxChildFootprintRadius +
+      this.layoutSettings.branchPadding +
+      10
 
-    rootIds.forEach((rootId, index) => {
-      const column = index % columns
-      const row = Math.floor(index / columns)
-      const rootX = (column - (columns - 1) / 2) * cellWidth
-      const rootY = (row - (rows - 1) / 2) * cellHeight
-      const rootAngle =
-        rootX === 0 && rootY === 0
-          ? -Math.PI / 2
-          : Math.atan2(rootY, rootX)
+    if (childCount === 1) {
+      return {
+        orbitRadius: Math.max(minOrbitRadius, orbitRadiusOverride ?? 0),
+        slotArcWidths,
+        gapArc: 0,
+        maxChildInfluenceRadius,
+        maxChildFootprintRadius,
+      }
+    }
 
-      this.placeSubtree(rootId, rootX, rootY, rootAngle, visibleStates)
-    })
+    const baseGapArc =
+      this.layoutSettings.siblingGap +
+      this.layoutSettings.branchPadding * 0.4 +
+      NODE_RADIUS * 0.5
+    const occupiedArc =
+      slotArcWidths.reduce((sum, slotArcWidth) => sum + slotArcWidth, 0) +
+      baseGapArc * childCount
+    const orbitRadius = Math.max(
+      minOrbitRadius,
+      orbitRadiusOverride ?? 0,
+      occupiedArc / (Math.PI * 2),
+    )
+    const availableArc = orbitRadius * Math.PI * 2
+    const extraArc = Math.max(0, availableArc - occupiedArc)
+    const sharedExtraGapArc = extraArc / childCount
+
+    return {
+      orbitRadius,
+      slotArcWidths,
+      gapArc: baseGapArc + sharedExtraGapArc,
+      maxChildInfluenceRadius,
+      maxChildFootprintRadius,
+    }
   }
 
   private placeSubtree(
     nodeId: string,
     x: number,
     y: number,
-    angle: number,
+    parentAngle: number,
     visibleStates: Map<string, VisibleNodeState>,
   ) {
     const state = visibleStates.get(nodeId)!
 
     state.initialX = x
     state.initialY = y
-    state.angle = angle
 
     const childCount = state.visibleChildren.length
 
@@ -629,67 +389,183 @@ export class GraphLayoutEngine {
       return
     }
 
-    const spread = this.getChildSpread(childCount)
+    const childStates = state.visibleChildren.map((childId) => visibleStates.get(childId)!)
+    const orbitLayout = this.getChildOrbitLayout(childStates, state.orbitRadius)
+
+    if (childCount === 1) {
+      const childId = state.visibleChildren[0]
+      const childX = x + Math.cos(parentAngle) * orbitLayout.orbitRadius
+      const childY = y + Math.sin(parentAngle) * orbitLayout.orbitRadius
+
+      this.placeSubtree(childId, childX, childY, parentAngle, visibleStates)
+      return
+    }
+
+    const wrapGapDirection = state.node.parentId === null ? -Math.PI / 2 : parentAngle + Math.PI
+    let cursorAngle = wrapGapDirection + orbitLayout.gapArc / orbitLayout.orbitRadius / 2
 
     state.visibleChildren.forEach((childId, index) => {
-      const childAngle =
-        childCount === 1
-          ? angle
-          : angle - spread / 2 + (spread * index) / (childCount - 1)
-      const childX = x + Math.cos(childAngle) * state.orbitRadius
-      const childY = y + Math.sin(childAngle) * state.orbitRadius
+      cursorAngle += orbitLayout.slotArcWidths[index] / orbitLayout.orbitRadius / 2
+
+      const childAngle = cursorAngle
+      const childX = x + Math.cos(childAngle) * orbitLayout.orbitRadius
+      const childY = y + Math.sin(childAngle) * orbitLayout.orbitRadius
 
       this.placeSubtree(childId, childX, childY, childAngle, visibleStates)
+
+      cursorAngle += orbitLayout.slotArcWidths[index] / orbitLayout.orbitRadius / 2
+      cursorAngle += orbitLayout.gapArc / orbitLayout.orbitRadius
     })
   }
 
-  private getChildSpread(childCount: number) {
-    if (childCount <= 1) {
-      return 0
+  private measureBounds(
+    nodes: PositionedNode[],
+    visibleStates: Map<string, VisibleNodeState>,
+  ) {
+    const bounds = nodes.reduce<LayoutBounds>((acc, node) => {
+      const state = visibleStates.get(node.id)!
+
+      acc.minX = Math.min(acc.minX, node.x - state.footprintRadius)
+      acc.minY = Math.min(acc.minY, node.y - state.footprintRadius)
+      acc.maxX = Math.max(acc.maxX, node.x + state.footprintRadius)
+      acc.maxY = Math.max(acc.maxY, node.y + state.footprintRadius)
+
+      return acc
+    }, createEmptyBounds())
+
+    bounds.width = bounds.maxX - bounds.minX
+    bounds.height = bounds.maxY - bounds.minY
+
+    return bounds
+  }
+
+  private packFamilies(
+    families: FamilyLayout[],
+    visibleStates: Map<string, VisibleNodeState>,
+  ) {
+    const gap = this.layoutSettings.rootGap + COLLISION_PADDING * 2
+    const familyMetrics = families.map((family) => ({
+      family,
+      bounds: this.measureBounds(family.nodes, visibleStates),
+    }))
+
+    const totalArea = familyMetrics.reduce(
+      (sum, metric) => sum + metric.bounds.width * metric.bounds.height,
+      0,
+    )
+    const aspectRatio = clamp(this.viewportWidth / Math.max(1, this.viewportHeight), 0.72, 1.9)
+    const targetRowWidth = Math.max(
+      ...familyMetrics.map((metric) => metric.bounds.width),
+      Math.sqrt(Math.max(totalArea, 1) * aspectRatio),
+    )
+    const rows: Array<{
+      metrics: typeof familyMetrics
+      width: number
+      height: number
+    }> = []
+    let currentRow: typeof familyMetrics = []
+    let currentRowWidth = 0
+    let currentRowHeight = 0
+
+    const flushRow = () => {
+      if (currentRow.length === 0) {
+        return
+      }
+
+      rows.push({
+        metrics: currentRow,
+        width: currentRowWidth,
+        height: currentRowHeight,
+      })
+      currentRow = []
+      currentRowWidth = 0
+      currentRowHeight = 0
     }
 
-    return Math.min(Math.PI * 1.18, Math.PI * 0.58 + childCount * 0.18)
+    familyMetrics.forEach((metric) => {
+      const nextWidth =
+        currentRow.length === 0
+          ? metric.bounds.width
+          : currentRowWidth + gap + metric.bounds.width
+
+      if (currentRow.length > 0 && nextWidth > targetRowWidth) {
+        flushRow()
+      }
+
+      currentRow.push(metric)
+      currentRowWidth =
+        currentRow.length === 1
+          ? metric.bounds.width
+          : currentRowWidth + gap + metric.bounds.width
+      currentRowHeight = Math.max(currentRowHeight, metric.bounds.height)
+    })
+
+    flushRow()
+
+    const totalHeight =
+      rows.reduce((sum, row) => sum + row.height, 0) + Math.max(0, rows.length - 1) * gap
+    let cursorY = -totalHeight / 2
+    const packedNodes: PositionedNode[] = []
+
+    rows.forEach((row) => {
+      let cursorX = -row.width / 2
+
+      row.metrics.forEach((metric) => {
+        const offsetX = cursorX - metric.bounds.minX
+        const offsetY =
+          cursorY + (row.height - metric.bounds.height) / 2 - metric.bounds.minY
+
+        metric.family.nodes.forEach((node) => {
+          packedNodes.push({
+            ...node,
+            x: node.x + offsetX,
+            y: node.y + offsetY,
+          })
+        })
+
+        cursorX += metric.bounds.width + gap
+      })
+
+      cursorY += row.height + gap
+    })
+
+    return packedNodes
   }
 
-  private estimateCanvasWidth(visibleStates: Map<string, VisibleNodeState>) {
-    const roots = this.graph.roots
-      .filter((rootId) => visibleStates.has(rootId))
-      .map((rootId) => visibleStates.get(rootId)!.footprintRadius * 2)
-
-    return (
-      roots.reduce((sum, width) => sum + width, 0) +
-      Math.max(0, roots.length - 1) * this.layoutSettings.rootGap +
-      600
-    )
-  }
-
-  private estimateCanvasHeight(visibleStates: Map<string, VisibleNodeState>) {
-    const height = Math.max(
-      900,
-      ...Array.from(visibleStates.values(), (state) => state.footprintRadius * 2.7),
-    )
-
-    return height + 400
-  }
-
-  private publishSnapshot(
+  private publishPackedSnapshot(
     version: number,
-    colaNodes: ColaNode[],
+    families: FamilyLayout[],
     visibleStates: Map<string, VisibleNodeState>,
     edges: LayoutEdge[],
     storeSnapshot: GraphStoreSnapshot,
   ) {
-    const nodes: LayoutNode[] = colaNodes.map((colaNode) => {
-      const state = visibleStates.get(colaNode.id)!
+    this.publishSnapshot(
+      version,
+      this.packFamilies(families, visibleStates),
+      visibleStates,
+      edges,
+      storeSnapshot,
+    )
+  }
+
+  private publishSnapshot(
+    version: number,
+    nodesByPosition: PositionedNode[],
+    visibleStates: Map<string, VisibleNodeState>,
+    edges: LayoutEdge[],
+    storeSnapshot: GraphStoreSnapshot,
+  ) {
+    const nodes: LayoutNode[] = nodesByPosition.map((nodePosition) => {
+      const state = visibleStates.get(nodePosition.id)!
       const node = state.node
 
       return {
-        id: colaNode.id,
+        id: nodePosition.id,
         label: node.label,
         parentId: node.parentId,
         depth: node.depth,
-        x: colaNode.x,
-        y: colaNode.y,
+        x: nodePosition.x,
+        y: nodePosition.y,
         visualRadius: getVisualRadiusForDepth(node.depth),
         boxRadius: state.boxRadius,
         footprintRadius: state.footprintRadius,
@@ -699,23 +575,13 @@ export class GraphLayoutEngine {
       }
     })
 
-    const bounds = nodes.reduce<LayoutBounds>(
-      (acc, node) => {
-        acc.minX = Math.min(acc.minX, node.x - node.footprintRadius)
-        acc.minY = Math.min(acc.minY, node.y - node.footprintRadius)
-        acc.maxX = Math.max(acc.maxX, node.x + node.footprintRadius)
-        acc.maxY = Math.max(acc.maxY, node.y + node.footprintRadius)
-        return acc
-      },
-      {
-        minX: Number.POSITIVE_INFINITY,
-        minY: Number.POSITIVE_INFINITY,
-        maxX: Number.NEGATIVE_INFINITY,
-        maxY: Number.NEGATIVE_INFINITY,
-        width: 0,
-        height: 0,
-      },
-    )
+    const bounds = nodes.reduce<LayoutBounds>((acc, node) => {
+      acc.minX = Math.min(acc.minX, node.x - node.footprintRadius)
+      acc.minY = Math.min(acc.minY, node.y - node.footprintRadius)
+      acc.maxX = Math.max(acc.maxX, node.x + node.footprintRadius)
+      acc.maxY = Math.max(acc.maxY, node.y + node.footprintRadius)
+      return acc
+    }, createEmptyBounds())
 
     bounds.width = bounds.maxX - bounds.minX
     bounds.height = bounds.maxY - bounds.minY
@@ -730,17 +596,12 @@ export class GraphLayoutEngine {
       bounds,
       maxDepth: storeSnapshot.maxDepth,
       maxSupportedDepth: this.graph.maxDepth,
-      solverMode: this.solverMode,
-      edgeSettings: { ...this.edgeSettings },
-      layoutSettings: { ...this.layoutSettings },
     }
 
     this.listeners.forEach((listener) => listener(this.lastSnapshot!))
   }
 }
 
-export function createLayoutEngine(
-  store: GraphStore,
-) {
+export function createLayoutEngine(store: GraphStore) {
   return new GraphLayoutEngine(store)
 }
