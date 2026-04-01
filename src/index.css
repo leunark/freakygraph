@@ -39,6 +39,44 @@ body {
   touch-action: none;
 }
 
+.fps-badge {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 18;
+  pointer-events: none;
+  display: grid;
+  gap: 0.18rem;
+  min-width: 76px;
+  border: 1px solid rgba(98, 118, 148, 0.42);
+  border-radius: 16px;
+  padding: 0.72rem 0.85rem;
+  background:
+    linear-gradient(180deg, rgba(14, 19, 27, 0.94), rgba(7, 10, 15, 0.98));
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.34);
+  color: #edf4ff;
+  backdrop-filter: blur(14px);
+}
+
+.fps-badge span,
+.fps-badge strong {
+  margin: 0;
+}
+
+.fps-badge span {
+  color: #8ea6c7;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.fps-badge strong {
+  color: #f7fbff;
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+
 .gizmo-shell {
   position: fixed;
   top: 12px;
@@ -254,6 +292,14 @@ body {
 }
 
 @media (max-width: 720px) {
+  .fps-badge {
+    top: 10px;
+    right: 10px;
+    min-width: 68px;
+    border-radius: 14px;
+    padding: 0.62rem 0.72rem;
+  }
+
   .gizmo-shell {
     top: 10px;
     left: 10px;

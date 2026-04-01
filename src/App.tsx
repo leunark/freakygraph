@@ -22,6 +22,7 @@ function getInitialGizmoOpen() {
 const INITIAL_HUD_SNAPSHOT: RendererHudSnapshot = {
   visibleCount: 0,
   totalCount: 0,
+  fps: 0,
 }
 
 function areGraphSettingsEqual(left: ExampleGraphSettings, right: ExampleGraphSettings) {
@@ -113,6 +114,10 @@ function App() {
   return (
     <div className="app-shell">
       <canvas ref={canvasRef} className="graph-canvas" />
+      <div className="fps-badge" aria-live="off">
+        <span>FPS</span>
+        <strong>{hudSnapshot.fps > 0 ? hudSnapshot.fps : '--'}</strong>
+      </div>
       <GizmoPanel
         open={gizmoOpen}
         graphSettings={graphSettings}

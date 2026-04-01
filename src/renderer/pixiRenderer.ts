@@ -76,6 +76,7 @@ export interface PixiRendererHandle {
 export interface RendererHudSnapshot {
   visibleCount: number
   totalCount: number
+  fps: number
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -321,10 +322,14 @@ async function loadNodeFont() {
   }
 }
 
-function toHudSnapshot(snapshot: LayoutSnapshot): RendererHudSnapshot {
+function toHudSnapshot(
+  snapshot: LayoutSnapshot | null,
+  fps: number,
+): RendererHudSnapshot {
   return {
-    visibleCount: snapshot.visibleCount,
-    totalCount: snapshot.totalCount,
+    visibleCount: snapshot?.visibleCount ?? 0,
+    totalCount: snapshot?.totalCount ?? 0,
+    fps,
   }
 }
 
@@ -375,6 +380,8 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
 
   let currentSnapshot: LayoutSnapshot | null = null
   let currentHudSnapshot: RendererHudSnapshot | null = null
+  let currentFps = 0
+  let lastFpsSampleAt = 0
   let didAutoFit = false
   let destroyed = false
   let isPanning = false
@@ -657,19 +664,24 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
 
   canvas.addEventListener('wheel', handleWheel, { passive: false })
 
-  const syncSnapshot = (snapshot: LayoutSnapshot) => {
-    currentSnapshot = snapshot
-    const hudSnapshot = toHudSnapshot(snapshot)
+  const publishHudSnapshot = () => {
+    const hudSnapshot = toHudSnapshot(currentSnapshot, currentFps)
     const hudChanged =
       !currentHudSnapshot ||
       hudSnapshot.visibleCount !== currentHudSnapshot.visibleCount ||
-      hudSnapshot.totalCount !== currentHudSnapshot.totalCount
+      hudSnapshot.totalCount !== currentHudSnapshot.totalCount ||
+      hudSnapshot.fps !== currentHudSnapshot.fps
 
     currentHudSnapshot = hudSnapshot
 
     if (hudChanged) {
       hudListeners.forEach((listener) => listener(hudSnapshot))
     }
+  }
+
+  const syncSnapshot = (snapshot: LayoutSnapshot) => {
+    currentSnapshot = snapshot
+    publishHudSnapshot()
 
     const now = performance.now()
     const activeIds = new Set(snapshot.nodes.map((node) => node.id))
@@ -753,6 +765,12 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
 
   app.ticker.add(() => {
     const now = performance.now()
+
+    if (now - lastFpsSampleAt >= 250) {
+      lastFpsSampleAt = now
+      currentFps = Math.max(0, Math.round(app.ticker.FPS))
+      publishHudSnapshot()
+    }
 
     nodeVisuals.forEach((visual, id) => {
       if (visual.phase === 'entering') {
