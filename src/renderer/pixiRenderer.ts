@@ -289,9 +289,10 @@ function fitSceneToSnapshot(scene: Container, snapshot: LayoutSnapshot, width: n
     return
   }
 
-  const padding = clamp(Math.min(width, height) * 0.12, 40, 120)
-  const availableWidth = Math.max(1, width - padding * 2)
-  const availableHeight = Math.max(1, height - padding * 2)
+  const horizontalPadding = clamp(width * 0.035, 12, 44)
+  const verticalPadding = clamp(height * 0.07, 18, 72)
+  const availableWidth = Math.max(1, width - horizontalPadding * 2)
+  const availableHeight = Math.max(1, height - verticalPadding * 2)
   const scale = clamp(
     Math.min(availableWidth / snapshot.bounds.width, availableHeight / snapshot.bounds.height),
     CAMERA_MIN_SCALE,
@@ -435,12 +436,6 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
       .fill({ color: 0x05070a, alpha: 0.42 })
       .rect(width - Math.max(260, width * 0.18), 0, Math.max(260, width * 0.18), height)
       .fill({ color: 0x06090d, alpha: 0.36 })
-      .moveTo(32, 96)
-      .lineTo(width - 32, 96)
-      .stroke({ color: 0xffffff, width: 1, alpha: 0.025 })
-      .moveTo(32, height - 88)
-      .lineTo(width - 32, height - 88)
-      .stroke({ color: 0xffffff, width: 1, alpha: 0.02 })
 
     app.stage.hitArea = new Rectangle(0, 0, width, height)
     layoutEngine.setViewportSize(width, height)
