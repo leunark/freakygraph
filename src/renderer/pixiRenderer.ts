@@ -386,15 +386,42 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
   let panStartScene = new Point()
   let panStartPointer = new Point()
   const activePointers = new Map<number, Point>()
+  let lastViewportWidth = 0
+  let lastViewportHeight = 0
+  let viewportSyncFrame = 0
+  let viewportSyncTimeout = 0
 
   sceneContainer.addChild(edgeLayer, nodeLayer)
   backgroundLayer.addChild(backdrop)
   app.stage.addChild(backgroundLayer, sceneContainer)
   app.stage.eventMode = 'static'
 
-  const resizeStage = () => {
-    const width = app.screen.width
-    const height = app.screen.height
+  const clearInteractions = () => {
+    activePointers.clear()
+    pinchStartDistance = 0
+    pinchStartScale = sceneContainer.scale.x
+    isPanning = false
+    pressedNodeId = null
+    dragNodeId = null
+  }
+
+  const syncViewport = () => {
+    viewportSyncFrame = 0
+    app.resize()
+
+    const width = Math.max(1, Math.round(app.screen.width))
+    const height = Math.max(1, Math.round(app.screen.height))
+    const hadViewport = lastViewportWidth > 0 && lastViewportHeight > 0
+    const orientationFlipped =
+      hadViewport &&
+      (lastViewportWidth > lastViewportHeight) !== (width > height)
+    const widthRatio = hadViewport
+      ? Math.max(width / lastViewportWidth, lastViewportWidth / width)
+      : 1
+    const heightRatio = hadViewport
+      ? Math.max(height / lastViewportHeight, lastViewportHeight / height)
+      : 1
+    const majorViewportChange = orientationFlipped || widthRatio > 1.22 || heightRatio > 1.22
 
     backdrop
       .clear()
@@ -417,10 +444,35 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
 
     app.stage.hitArea = new Rectangle(0, 0, width, height)
     layoutEngine.setViewportSize(width, height)
+    clearInteractions()
+
+    if (currentSnapshot && majorViewportChange) {
+      fitSceneToSnapshot(sceneContainer, currentSnapshot, width, height)
+    }
+
+    lastViewportWidth = width
+    lastViewportHeight = height
     app.render()
   }
 
-  resizeStage()
+  const scheduleViewportSync = () => {
+    if (viewportSyncFrame) {
+      window.cancelAnimationFrame(viewportSyncFrame)
+    }
+
+    if (viewportSyncTimeout) {
+      window.clearTimeout(viewportSyncTimeout)
+    }
+
+    viewportSyncFrame = window.requestAnimationFrame(() => {
+      syncViewport()
+      viewportSyncTimeout = window.setTimeout(() => {
+        syncViewport()
+      }, 180)
+    })
+  }
+
+  syncViewport()
 
   const startPinchGesture = () => {
     const pinch = getTrackedPinch(activePointers)
@@ -557,7 +609,9 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
   window.addEventListener('pointermove', pointerMove)
   window.addEventListener('pointerup', pointerUp)
   window.addEventListener('pointercancel', pointerUp)
-  window.addEventListener('resize', resizeStage)
+  window.addEventListener('resize', scheduleViewportSync)
+  window.addEventListener('orientationchange', scheduleViewportSync)
+  window.visualViewport?.addEventListener('resize', scheduleViewportSync)
 
   app.stage.on('pointerdown', (event) => {
     const clientX = event.global.x
@@ -845,7 +899,15 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
       window.removeEventListener('pointermove', pointerMove)
       window.removeEventListener('pointerup', pointerUp)
       window.removeEventListener('pointercancel', pointerUp)
-      window.removeEventListener('resize', resizeStage)
+      window.removeEventListener('resize', scheduleViewportSync)
+      window.removeEventListener('orientationchange', scheduleViewportSync)
+      window.visualViewport?.removeEventListener('resize', scheduleViewportSync)
+      if (viewportSyncFrame) {
+        window.cancelAnimationFrame(viewportSyncFrame)
+      }
+      if (viewportSyncTimeout) {
+        window.clearTimeout(viewportSyncTimeout)
+      }
       canvas.removeEventListener('wheel', handleWheel)
       app.destroy(undefined, { children: true })
     },
