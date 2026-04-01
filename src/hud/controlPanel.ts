@@ -1,7 +1,6 @@
 import {
   Container,
   Graphics,
-  Point,
   Rectangle,
   Text,
   TextStyle,
@@ -16,9 +15,6 @@ import {
   DEFAULT_CHILD_MIN_COUNT,
   DEFAULT_EXAMPLE_DEPTH,
   DEFAULT_EXAMPLE_ROOT_COUNT,
-  MAX_EXAMPLE_DEPTH,
-  MAX_EXAMPLE_ROOT_COUNT,
-  MAX_CHILD_COUNT,
   MIN_EXAMPLE_DEPTH,
   MIN_EXAMPLE_ROOT_COUNT,
   MIN_CHILD_COUNT,
@@ -35,7 +31,6 @@ const BUTTON_RADIUS = 14
 const SECTION_GAP = 14
 const ROW_GAP = 10
 const SLIDER_HEIGHT = 60
-const SLIDER_TRACK_WIDTH = CONTENT_WIDTH - 108
 const CARD_RADIUS = 18
 const TEXT_RESOLUTION =
   typeof window === 'undefined'
@@ -206,29 +201,75 @@ class HudSlider {
   readonly height = SLIDER_HEIGHT
 
   private readonly shell = new Graphics()
-  private readonly valueChip = new Graphics()
+  private readonly field = new Graphics()
   private readonly title: Text
   private readonly valueLabel: Text
-  private readonly track = new Graphics()
-  private readonly fill = new Graphics()
-  private readonly handle = new Graphics()
   private min: number
   private max: number
   private readonly step: number
   private readonly formatValue: (value: number) => string
   private readonly onChange: (value: number) => void
   private value: number
-  private dragging = false
-  private pointerMove = (event: PointerEvent) => {
-    if (!this.dragging) {
+  private focused = false
+  private selecting = false
+  private draft = ''
+  private static activeField: HudSlider | null = null
+  private readonly pointerDown = (event: FederatedPointerEvent) => {
+    event.stopPropagation()
+    this.focus()
+  }
+  private readonly keyDown = (event: KeyboardEvent) => {
+    if (!this.focused) {
       return
     }
 
-    const local = this.track.toLocal(new Point(event.clientX, event.clientY))
-    this.updateFromTrackPosition(local.x)
-  }
-  private pointerUp = () => {
-    this.dragging = false
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      this.commitDraft()
+      this.blur()
+      event.preventDefault()
+      return
+    }
+
+    if (event.key === 'Escape') {
+      this.blur()
+      event.preventDefault()
+      return
+    }
+
+    if (event.key === 'ArrowUp') {
+      this.applyStep(1)
+      event.preventDefault()
+      return
+    }
+
+    if (event.key === 'ArrowDown') {
+      this.applyStep(-1)
+      event.preventDefault()
+      return
+    }
+
+    if (event.key === 'Backspace') {
+      this.draft = this.selecting ? '' : this.draft.slice(0, -1)
+      this.selecting = false
+      this.redraw()
+      event.preventDefault()
+      return
+    }
+
+    if (event.key === 'Delete') {
+      this.draft = ''
+      this.selecting = false
+      this.redraw()
+      event.preventDefault()
+      return
+    }
+
+    if (/^\d$/.test(event.key)) {
+      this.draft = this.selecting ? event.key : `${this.draft}${event.key}`
+      this.selecting = false
+      this.redraw()
+      event.preventDefault()
+    }
   }
 
   constructor(options: SliderOptions) {
@@ -246,37 +287,20 @@ class HudSlider {
 
     this.container.addChild(
       this.shell,
-      this.valueChip,
+      this.field,
       this.title,
       this.valueLabel,
-      this.track,
-      this.fill,
-      this.handle,
     )
 
-    this.title.position.set(14, 12)
-    this.valueLabel.position.set(CONTENT_WIDTH - 14, 16)
-    this.track.position.set(14, 42)
-    this.fill.position.set(14, 42)
-    this.handle.position.set(14, 42)
+    this.title.position.set(14, 18)
+    this.valueLabel.position.set(CONTENT_WIDTH - 14, SLIDER_HEIGHT / 2)
 
-    this.track.eventMode = 'static'
-    this.track.cursor = 'pointer'
-    this.handle.eventMode = 'static'
-    this.handle.cursor = 'pointer'
+    this.container.eventMode = 'static'
+    this.container.cursor = 'text'
+    this.container.hitArea = new Rectangle(0, 0, CONTENT_WIDTH, SLIDER_HEIGHT)
+    this.container.on('pointerdown', this.pointerDown)
 
-    const startDrag = (event: FederatedPointerEvent) => {
-      event.stopPropagation()
-      this.dragging = true
-      const local = this.track.toLocal(event.global)
-      this.updateFromTrackPosition(local.x)
-    }
-
-    this.track.on('pointerdown', startDrag)
-    this.handle.on('pointerdown', startDrag)
-
-    window.addEventListener('pointermove', this.pointerMove)
-    window.addEventListener('pointerup', this.pointerUp)
+    window.addEventListener('keydown', this.keyDown)
 
     this.redraw()
   }
@@ -290,35 +314,92 @@ class HudSlider {
     this.min = min
     this.max = max
     this.value = clamp(this.value, this.min, this.max)
+
+    if (this.focused) {
+      this.draft = `${this.value}`
+    }
+
     this.redraw()
   }
 
   destroy() {
-    window.removeEventListener('pointermove', this.pointerMove)
-    window.removeEventListener('pointerup', this.pointerUp)
+    if (HudSlider.activeField === this) {
+      HudSlider.activeField = null
+    }
+
+    window.removeEventListener('keydown', this.keyDown)
   }
 
-  private updateFromTrackPosition(x: number) {
-    const clampedX = clamp(x, 0, SLIDER_TRACK_WIDTH)
-    const ratio = SLIDER_TRACK_WIDTH === 0 ? 0 : clampedX / SLIDER_TRACK_WIDTH
+  private focus() {
+    if (HudSlider.activeField && HudSlider.activeField !== this) {
+      HudSlider.activeField.blur()
+    }
+
+    HudSlider.activeField = this
+    this.focused = true
+    this.selecting = true
+    this.draft = `${this.value}`
+    this.redraw()
+  }
+
+  private blur() {
+    if (HudSlider.activeField === this) {
+      HudSlider.activeField = null
+    }
+
+    this.focused = false
+    this.selecting = false
+    this.draft = `${this.value}`
+    this.redraw()
+  }
+
+  private commitDraft() {
+    if (this.draft.trim() === '') {
+      this.draft = `${this.value}`
+      return
+    }
+
+    const parsed = Number.parseInt(this.draft, 10)
+
+    if (Number.isNaN(parsed)) {
+      this.draft = `${this.value}`
+      return
+    }
+
     const nextValue = clamp(
-      Math.round((this.min + ratio * (this.max - this.min)) / this.step) * this.step,
+      Math.round(parsed / this.step) * this.step,
       this.min,
       this.max,
     )
 
-    if (nextValue === this.value) {
-      return
+    this.draft = `${nextValue}`
+
+    if (nextValue !== this.value) {
+      this.value = nextValue
+      this.onChange(nextValue)
     }
+  }
+
+  private applyStep(direction: -1 | 1) {
+    const nextValue = clamp(
+      this.value + this.step * direction,
+      this.min,
+      this.max,
+    )
 
     this.value = nextValue
+    this.draft = `${nextValue}`
+    this.selecting = true
     this.redraw()
     this.onChange(nextValue)
   }
 
   private redraw() {
-    const ratio = this.max === this.min ? 0 : (this.value - this.min) / (this.max - this.min)
-    const handleX = ratio * SLIDER_TRACK_WIDTH
+    const displayValue = this.focused ? this.draft || '' : this.formatValue(this.value)
+    const fieldWidth = 96
+    const fieldHeight = 28
+    const fieldX = CONTENT_WIDTH - fieldWidth - 14
+    const fieldY = Math.round((SLIDER_HEIGHT - fieldHeight) / 2)
 
     this.shell
       .clear()
@@ -326,32 +407,21 @@ class HudSlider {
       .fill({ color: 0x070a0f, alpha: 0.98 })
       .stroke({ color: 0x1d2530, width: 1, alpha: 0.96 })
 
-    this.valueChip
+    this.field
       .clear()
-      .roundRect(CONTENT_WIDTH - 82, 8, 68, 18, 9)
+      .roundRect(fieldX, fieldY, fieldWidth, fieldHeight, 10)
       .fill({ color: 0x0d1118, alpha: 1 })
-      .stroke({ color: 0x273240, width: 1, alpha: 0.98 })
+      .stroke({
+        color: this.focused ? 0x8cb9ff : 0x273240,
+        width: this.focused ? 2 : 1,
+        alpha: 0.98,
+      })
 
-    this.track
-      .clear()
-      .roundRect(0, -4, SLIDER_TRACK_WIDTH, 8, 5)
-      .fill({ color: 0x0a0d12, alpha: 1 })
-      .stroke({ color: 0x1c2430, width: 1, alpha: 1 })
-
-    this.fill
-      .clear()
-      .roundRect(0, -4, handleX, 8, 5)
-      .fill({ color: 0x8cb9ff, alpha: 0.9 })
-
-    this.handle
-      .clear()
-      .circle(handleX, 0, 9)
-      .fill({ color: 0xf4f8ff, alpha: 1 })
-      .stroke({ color: 0x9bc2ff, width: 2, alpha: 0.96 })
-      .circle(handleX, 0, 15)
-      .stroke({ color: 0x9bc2ff, width: 1, alpha: 0.16 })
-
-    this.valueLabel.text = this.formatValue(this.value)
+    this.valueLabel.text = displayValue
+    this.valueLabel.style = new TextStyle({
+      ...valueStyle,
+      fill: this.focused ? 0xf7fbff : 0xe7edf8,
+    })
   }
 }
 
@@ -415,7 +485,7 @@ export class ControlPanel {
   ) {
     const title = createHudText('Gizmo', titleStyle)
     const subtitle = createHudText(
-      'Graph controls. Changes to these settings will reset the graph.',
+      'Changes to these settings will reset the graph.\n Heavily increasing values will crash the application.',
       subtitleStyle,
     )
     const actionsLabel = new SectionLabel('Actions')
@@ -431,7 +501,7 @@ export class ControlPanel {
       label: 'Root Nodes',
       value: DEFAULT_EXAMPLE_ROOT_COUNT,
       min: MIN_EXAMPLE_ROOT_COUNT,
-      max: MAX_EXAMPLE_ROOT_COUNT,
+      max: Number.POSITIVE_INFINITY,
       step: 1,
       formatValue: (value) => `${value}`,
       onChange: (value) => onRootCountChange?.(value),
@@ -440,7 +510,7 @@ export class ControlPanel {
       label: 'Depth',
       value: DEFAULT_EXAMPLE_DEPTH,
       min: MIN_EXAMPLE_DEPTH,
-      max: MAX_EXAMPLE_DEPTH,
+      max: Number.POSITIVE_INFINITY,
       step: 1,
       formatValue: (value) => `${value}`,
       onChange: (value) => onDepthChange?.(value),
@@ -449,11 +519,11 @@ export class ControlPanel {
       label: 'Children Min',
       value: DEFAULT_CHILD_MIN_COUNT,
       min: MIN_CHILD_COUNT,
-      max: DEFAULT_CHILD_MAX_COUNT,
+      max: Number.POSITIVE_INFINITY,
       step: 1,
       formatValue: (value) => `${value}`,
       onChange: (value) => {
-        this.childMaxSlider.setRange(value, MAX_CHILD_COUNT)
+        this.childMaxSlider.setRange(value, Number.POSITIVE_INFINITY)
         onChildMinChange?.(value)
       },
     })
@@ -461,7 +531,7 @@ export class ControlPanel {
       label: 'Children Max',
       value: DEFAULT_CHILD_MAX_COUNT,
       min: DEFAULT_CHILD_MIN_COUNT,
-      max: MAX_CHILD_COUNT,
+      max: Number.POSITIVE_INFINITY,
       step: 1,
       formatValue: (value) => `${value}`,
       onChange: (value) => {
@@ -492,7 +562,7 @@ export class ControlPanel {
     title.position.set(PANEL_PADDING, cursorY)
     cursorY += 28
     subtitle.position.set(PANEL_PADDING, cursorY)
-    cursorY += 28
+    cursorY += 28 * 2
 
     actionsLabel.container.position.set(PANEL_PADDING, cursorY)
     cursorY += 28

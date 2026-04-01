@@ -154,7 +154,9 @@ function drawNode(visual: NodeVisual) {
   const palette = getNodePalette(data)
   const radius = data.visualRadius
   const ringWidth = data.isRoot ? 3 : 2
-  const labelFontSize = Math.max(10, Math.min(14, radius * 0.42))
+  const labelFontSize = Math.max(8, Math.min(14, radius * 0.34))
+  const maxLabelWidth = Math.max(20, radius * 1.4)
+  const maxLabelHeight = Math.max(18, radius * 1.05)
 
   circle
     .clear()
@@ -169,13 +171,24 @@ function drawNode(visual: NodeVisual) {
   visual.label.text = data.label
   visual.label.style = new TextStyle({
     align: 'center',
+    breakWords: true,
     fill: palette.label,
     fontFamily: NODE_FONT_FAMILY,
     fontSize: labelFontSize,
     fontWeight: '400',
+    lineHeight: Math.max(10, labelFontSize * 1.02),
     padding: 3,
+    wordWrap: true,
+    wordWrapWidth: maxLabelWidth,
   })
   visual.label.resolution = TEXT_RESOLUTION
+  visual.label.scale.set(1)
+
+  const widthScale = visual.label.width > 0 ? maxLabelWidth / visual.label.width : 1
+  const heightScale = visual.label.height > 0 ? maxLabelHeight / visual.label.height : 1
+  const fittedScale = Math.min(1, widthScale, heightScale)
+
+  visual.label.scale.set(Math.max(0.55, fittedScale))
 }
 
 function applyCameraZoom(scene: Container, clientX: number, clientY: number, nextScale: number) {

@@ -28,19 +28,13 @@ interface MutableBranch {
   children: MutableBranch[]
 }
 
-export const DEFAULT_EXAMPLE_NODE_COUNT = 77
-export const MIN_EXAMPLE_NODE_COUNT = 12
-export const MAX_EXAMPLE_NODE_COUNT = 240
-export const DEFAULT_EXAMPLE_ROOT_COUNT = 4
-export const MIN_EXAMPLE_ROOT_COUNT = 2
-export const MAX_EXAMPLE_ROOT_COUNT = 8
-export const DEFAULT_EXAMPLE_DEPTH = 5
-export const MIN_EXAMPLE_DEPTH = 2
-export const MAX_EXAMPLE_DEPTH = 8
-export const DEFAULT_CHILD_MIN_COUNT = 1
-export const DEFAULT_CHILD_MAX_COUNT = 3
+export const DEFAULT_EXAMPLE_ROOT_COUNT = 20
+export const MIN_EXAMPLE_ROOT_COUNT = 1
+export const DEFAULT_EXAMPLE_DEPTH = 3
+export const MIN_EXAMPLE_DEPTH = 0
+export const DEFAULT_CHILD_MIN_COUNT = 2
+export const DEFAULT_CHILD_MAX_COUNT = 4
 export const MIN_CHILD_COUNT = 0
-export const MAX_CHILD_COUNT = 8
 
 const ROOT_LABELS = [
   'Atlas',
@@ -97,20 +91,16 @@ const LABEL_SUFFIXES = [
   'Yard',
 ]
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value))
-}
-
 function normalizeRootCount(targetRootCount: number) {
-  return clamp(Math.round(targetRootCount), MIN_EXAMPLE_ROOT_COUNT, MAX_EXAMPLE_ROOT_COUNT)
+  return Math.max(MIN_EXAMPLE_ROOT_COUNT, Math.round(targetRootCount))
 }
 
 function normalizeDepth(targetDepth: number) {
-  return clamp(Math.round(targetDepth), MIN_EXAMPLE_DEPTH, MAX_EXAMPLE_DEPTH)
+  return Math.max(MIN_EXAMPLE_DEPTH, Math.round(targetDepth))
 }
 
 function normalizeChildCount(targetCount: number) {
-  return clamp(Math.round(targetCount), MIN_CHILD_COUNT, MAX_CHILD_COUNT)
+  return Math.max(MIN_CHILD_COUNT, Math.round(targetCount))
 }
 
 function createSeededRandom(seed: number) {
@@ -250,10 +240,6 @@ export function createExampleGraph(
         Math.floor(random() * (childMaxCount - childMinCount + 1))
 
       for (let index = 0; index < childCount; index += 1) {
-        if (nextIndex >= MAX_EXAMPLE_NODE_COUNT) {
-          break
-        }
-
         const childIndex = parent.children.length
         const label = createLabel(nextIndex, depth, parent.rootIndex)
         const child: MutableBranch = {
@@ -267,10 +253,6 @@ export function createExampleGraph(
         nextLayer.push(child)
         nextIndex += 1
       }
-    }
-
-    if (nextIndex >= MAX_EXAMPLE_NODE_COUNT) {
-      break
     }
 
     parentLayer = nextLayer

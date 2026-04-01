@@ -545,22 +545,25 @@ export class GraphLayoutEngine {
   }
 
   private placeRoots(rootIds: string[], visibleStates: Map<string, VisibleNodeState>) {
-    const rootFootprints = rootIds.map((rootId) => visibleStates.get(rootId)!.footprintRadius)
-    const totalWidth =
-      rootFootprints.reduce((sum, radius) => sum + radius * 2, 0) +
-      Math.max(0, rootFootprints.length - 1) * this.layoutSettings.rootGap
-
-    let cursorX = -totalWidth / 2
+    const maxRootFootprint = Math.max(
+      ...rootIds.map((rootId) => visibleStates.get(rootId)!.footprintRadius),
+    )
+    const columns = Math.max(1, Math.ceil(Math.sqrt(rootIds.length)))
+    const rows = Math.max(1, Math.ceil(rootIds.length / columns))
+    const cellWidth = maxRootFootprint * 2 + this.layoutSettings.rootGap
+    const cellHeight = maxRootFootprint * 2 + this.layoutSettings.rootGap
 
     rootIds.forEach((rootId, index) => {
-      const rootState = visibleStates.get(rootId)!
-      cursorX += rootState.footprintRadius
-      const rootX = cursorX
-      const rootY = ((index % 2 === 0 ? -1 : 1) * (index + 1) * 26) / 2
-      const rootAngle = Math.PI / 2 + (index - (rootIds.length - 1) / 2) * 0.18
+      const column = index % columns
+      const row = Math.floor(index / columns)
+      const rootX = (column - (columns - 1) / 2) * cellWidth
+      const rootY = (row - (rows - 1) / 2) * cellHeight
+      const rootAngle =
+        rootX === 0 && rootY === 0
+          ? -Math.PI / 2
+          : Math.atan2(rootY, rootX)
 
       this.placeSubtree(rootId, rootX, rootY, rootAngle, visibleStates)
-      cursorX += rootState.footprintRadius + this.layoutSettings.rootGap
     })
   }
 
