@@ -8,6 +8,7 @@ import {
 } from 'pixi.js'
 import {
   GraphLayoutEngine,
+  type LayoutSolverMode,
   type LayoutSnapshot,
 } from '../engine/layoutEngine'
 import {
@@ -194,6 +195,11 @@ interface SliderOptions {
   step: number
   formatValue: (value: number) => string
   onChange: (value: number) => void
+}
+
+interface SelectOption<T extends string> {
+  label: string
+  value: T
 }
 
 class HudSlider {
@@ -425,6 +431,167 @@ class HudSlider {
   }
 }
 
+interface SelectOptions<T extends string> {
+  label: string
+  options: SelectOption<T>[]
+  value: T
+  onChange: (value: T) => void
+}
+
+class HudSelect<T extends string> {
+  readonly container = new Container()
+  readonly height = SLIDER_HEIGHT
+
+  private static activeSelect: HudSelect<any> | null = null
+  private readonly shell = new Graphics()
+  private readonly field = new Graphics()
+  private readonly menu = new Container()
+  private readonly title: Text
+  private readonly valueLabel: Text
+  private readonly caret: Text
+  private readonly options: SelectOption<T>[]
+  private readonly onChange: (value: T) => void
+  private value: T
+  private open = false
+
+  constructor(options: SelectOptions<T>) {
+    this.options = options.options
+    this.onChange = options.onChange
+    this.value = options.value
+    this.title = createHudText(options.label, secondaryBodyStyle)
+    this.valueLabel = createHudText(this.getLabel(options.value), valueStyle, {
+      x: 1,
+      y: 0.5,
+    })
+    this.caret = createHudText('v', valueStyle, {
+      x: 0.5,
+      y: 0.5,
+    })
+
+    this.container.addChild(this.shell, this.field, this.menu, this.title, this.valueLabel, this.caret)
+    this.title.position.set(14, 18)
+    this.valueLabel.position.set(CONTENT_WIDTH - 34, SLIDER_HEIGHT / 2)
+    this.caret.position.set(CONTENT_WIDTH - 16, SLIDER_HEIGHT / 2)
+
+    this.container.eventMode = 'static'
+    this.container.cursor = 'pointer'
+    this.container.hitArea = new Rectangle(0, 0, CONTENT_WIDTH, SLIDER_HEIGHT)
+    this.container.on('pointerdown', (event) => {
+      event.stopPropagation()
+      this.toggle()
+    })
+
+    this.menu.position.set(0, -this.options.length * 34 - 10)
+    this.redraw()
+  }
+
+  setValue(value: T) {
+    this.value = value
+    this.redraw()
+  }
+
+  close() {
+    if (HudSelect.activeSelect === this) {
+      HudSelect.activeSelect = null
+    }
+
+    this.open = false
+    this.redraw()
+  }
+
+  destroy() {
+    this.close()
+  }
+
+  private toggle() {
+    if (this.open) {
+      this.close()
+      return
+    }
+
+    if (HudSelect.activeSelect && HudSelect.activeSelect !== this) {
+      HudSelect.activeSelect.close()
+    }
+
+    HudSelect.activeSelect = this as unknown as HudSelect<string>
+    this.open = true
+    this.redraw()
+  }
+
+  private getLabel(value: T) {
+    return this.options.find((option) => option.value === value)?.label ?? value
+  }
+
+  private redraw() {
+    const fieldWidth = 128
+    const fieldHeight = 28
+    const fieldX = CONTENT_WIDTH - fieldWidth - 14
+    const fieldY = Math.round((SLIDER_HEIGHT - fieldHeight) / 2)
+    const menuHeight = this.options.length * 34 + 8
+
+    this.shell
+      .clear()
+      .roundRect(0, 0, CONTENT_WIDTH, SLIDER_HEIGHT, 16)
+      .fill({ color: 0x070a0f, alpha: 0.98 })
+      .stroke({ color: 0x1d2530, width: 1, alpha: 0.96 })
+
+    this.field
+      .clear()
+      .roundRect(fieldX, fieldY, fieldWidth, fieldHeight, 10)
+      .fill({ color: 0x0d1118, alpha: 1 })
+      .stroke({ color: this.open ? 0x8cb9ff : 0x273240, width: this.open ? 2 : 1, alpha: 0.98 })
+
+    this.valueLabel.text = this.getLabel(this.value)
+    this.caret.text = this.open ? '^' : 'v'
+
+    this.menu.removeChildren()
+    this.menu.visible = this.open
+    this.container.hitArea = this.open
+      ? new Rectangle(0, -menuHeight - 10, CONTENT_WIDTH, SLIDER_HEIGHT + menuHeight + 10)
+      : new Rectangle(0, 0, CONTENT_WIDTH, SLIDER_HEIGHT)
+
+    if (!this.open) {
+      return
+    }
+
+    const menuBackground = new Graphics()
+    menuBackground
+      .roundRect(0, 0, CONTENT_WIDTH, this.options.length * 34 + 8, 14)
+      .fill({ color: 0x090d13, alpha: 0.98 })
+      .stroke({ color: 0x243041, width: 1, alpha: 0.98 })
+    this.menu.addChild(menuBackground)
+
+    this.options.forEach((option, index) => {
+      const row = new Container()
+      const rowBackground = new Graphics()
+      const selected = option.value === this.value
+      const y = 4 + index * 34
+
+      rowBackground
+        .roundRect(4, y, CONTENT_WIDTH - 8, 30, 10)
+        .fill({ color: selected ? 0x132033 : 0x0b1119, alpha: 1 })
+        .stroke({ color: selected ? 0x7faeff : 0x1f2a38, width: 1, alpha: 0.98 })
+
+      const label = createHudText(option.label, bodyStyle)
+      label.position.set(14, y + 15)
+      label.anchor = { x: 0, y: 0.5 }
+
+      row.eventMode = 'static'
+      row.cursor = 'pointer'
+      row.hitArea = new Rectangle(4, y, CONTENT_WIDTH - 8, 30)
+      row.on('pointerdown', (event) => {
+        event.stopPropagation()
+        this.value = option.value
+        this.onChange(option.value)
+        this.close()
+      })
+
+      row.addChild(rowBackground, label)
+      this.menu.addChild(row)
+    })
+  }
+}
+
 class SectionLabel {
   readonly container = new Container()
 
@@ -471,6 +638,7 @@ export class ControlPanel {
   private readonly depthSlider: HudSlider
   private readonly childMinSlider: HudSlider
   private readonly childMaxSlider: HudSlider
+  private readonly solverSelect: HudSelect<LayoutSolverMode>
   private readonly unsubscribers: Array<() => void> = []
   private panelHeight = 0
   private panelScale = 1
@@ -485,11 +653,12 @@ export class ControlPanel {
   ) {
     const title = createHudText('Gizmo', titleStyle)
     const subtitle = createHudText(
-      'Changes to these settings will reset the graph.\n Heavily increasing values will crash the application.',
+      'Changes to these settings will reset the graph.\nHeavily increasing values will crash the application.',
       subtitleStyle,
     )
     const actionsLabel = new SectionLabel('Actions')
     const graphLabel = new SectionLabel('Graph')
+    const solverLabel = new SectionLabel('Solver')
     const expandAll = new HudButton('Expand All', () => store.expandAll())
     const collapseAll = new HudButton('Collapse All', () => store.collapseAll())
     const fitView = new HudButton('Fit To Screen', () => layoutEngine.requestFitToScreen())
@@ -539,6 +708,16 @@ export class ControlPanel {
         onChildMaxChange?.(value)
       },
     })
+    this.solverSelect = new HudSelect<LayoutSolverMode>({
+      label: 'Mode',
+      value: layoutEngine.getSolverMode(),
+      options: [
+        { label: 'WebCola', value: 'cola' },
+        { label: 'WebCola Lite', value: 'cola-lite' },
+        { label: 'Seed Only', value: 'seed' },
+      ],
+      onChange: (value) => layoutEngine.updateSolverMode(value),
+    })
 
     this.container.addChild(
       this.background,
@@ -555,6 +734,8 @@ export class ControlPanel {
       this.depthSlider.container,
       this.childMinSlider.container,
       this.childMaxSlider.container,
+      solverLabel.container,
+      this.solverSelect.container,
     )
 
     let cursorY = PANEL_PADDING
@@ -585,7 +766,11 @@ export class ControlPanel {
     this.childMinSlider.container.position.set(PANEL_PADDING, cursorY)
     cursorY += this.childMinSlider.height + ROW_GAP
     this.childMaxSlider.container.position.set(PANEL_PADDING, cursorY)
-    cursorY += this.childMaxSlider.height + PANEL_PADDING
+    cursorY += this.childMaxSlider.height + SECTION_GAP
+    solverLabel.container.position.set(PANEL_PADDING, cursorY)
+    cursorY += 28
+    this.solverSelect.container.position.set(PANEL_PADDING, cursorY)
+    cursorY += this.solverSelect.height + PANEL_PADDING
 
     this.panelHeight = cursorY
     this.redrawBackground()
@@ -594,6 +779,7 @@ export class ControlPanel {
       layoutEngine.subscribe((snapshot: LayoutSnapshot) => {
         this.statsLeft.setValue(`${snapshot.visibleCount}`)
         this.statsRight.setValue(`${snapshot.totalCount}`)
+        this.solverSelect.setValue(snapshot.solverMode)
       }),
     )
   }
@@ -628,6 +814,7 @@ export class ControlPanel {
     this.depthSlider.destroy()
     this.childMinSlider.destroy()
     this.childMaxSlider.destroy()
+    this.solverSelect.destroy()
     this.unsubscribers.forEach((unsubscribe) => unsubscribe())
   }
 

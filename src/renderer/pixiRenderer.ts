@@ -29,6 +29,7 @@ const ENTER_EXIT_DURATION = 400
 const NODE_SPRING_STRENGTH = 0.12
 const NODE_SPRING_DAMPING = 0.74
 const NODE_DRAG_THRESHOLD = 6
+const EDGE_RENDER_THRESHOLD = 900
 const NODE_FONT_FAMILY = '"JetBrains Mono", Consolas, "Courier New", monospace'
 const TEXT_RESOLUTION =
   typeof window === 'undefined'
@@ -49,6 +50,7 @@ interface NodeVisual {
   container: Container
   circle: Graphics
   label: Text
+  appearanceKey: string
   displayX: number
   displayY: number
   targetX: number
@@ -133,6 +135,7 @@ function createNodeVisual(node: LayoutNode): NodeVisual {
     container,
     circle,
     label,
+    appearanceKey: '',
     displayX: node.x,
     displayY: node.y,
     targetX: node.x,
@@ -149,6 +152,43 @@ function createNodeVisual(node: LayoutNode): NodeVisual {
   }
 }
 
+const labelStyleCache = new Map<string, TextStyle>()
+
+function getLabelStyle(fontSize: number, fill: number, maxLabelWidth: number) {
+  const key = `${fontSize}:${fill}:${Math.round(maxLabelWidth)}`
+  const cached = labelStyleCache.get(key)
+
+  if (cached) {
+    return cached
+  }
+
+  const style = new TextStyle({
+    align: 'center',
+    breakWords: true,
+    fill,
+    fontFamily: NODE_FONT_FAMILY,
+    fontSize,
+    fontWeight: '400',
+    lineHeight: Math.max(10, fontSize * 1.02),
+    padding: 3,
+    wordWrap: true,
+    wordWrapWidth: maxLabelWidth,
+  })
+
+  labelStyleCache.set(key, style)
+  return style
+}
+
+function getNodeAppearanceKey(node: LayoutNode) {
+  return [
+    node.label,
+    node.visualRadius.toFixed(2),
+    node.isRoot ? 'r' : '',
+    node.isLeaf ? 'l' : '',
+    node.isExpanded ? 'e' : '',
+  ].join('|')
+}
+
 function drawNode(visual: NodeVisual) {
   const { data, circle } = visual
   const palette = getNodePalette(data)
@@ -157,6 +197,7 @@ function drawNode(visual: NodeVisual) {
   const labelFontSize = Math.max(8, Math.min(14, radius * 0.34))
   const maxLabelWidth = Math.max(20, radius * 1.4)
   const maxLabelHeight = Math.max(18, radius * 1.05)
+  visual.appearanceKey = getNodeAppearanceKey(data)
 
   circle
     .clear()
@@ -169,19 +210,9 @@ function drawNode(visual: NodeVisual) {
     })
 
   visual.label.text = data.label
-  visual.label.style = new TextStyle({
-    align: 'center',
-    breakWords: true,
-    fill: palette.label,
-    fontFamily: NODE_FONT_FAMILY,
-    fontSize: labelFontSize,
-    fontWeight: '400',
-    lineHeight: Math.max(10, labelFontSize * 1.02),
-    padding: 3,
-    wordWrap: true,
-    wordWrapWidth: maxLabelWidth,
-  })
+  visual.label.style = getLabelStyle(labelFontSize, palette.label, maxLabelWidth)
   visual.label.resolution = TEXT_RESOLUTION
+  visual.label.visible = true
   visual.label.scale.set(1)
 
   const widthScale = visual.label.width > 0 ? maxLabelWidth / visual.label.width : 1
@@ -489,6 +520,7 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
 
     snapshot.nodes.forEach((node) => {
       const existing = nodeVisuals.get(node.id)
+      const appearanceKey = getNodeAppearanceKey(node)
 
       if (!existing) {
         const visual = createNodeVisual(node)
@@ -525,7 +557,9 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
         existing.entryOriginY = existing.displayY
       }
 
-      drawNode(existing)
+      if (existing.appearanceKey !== appearanceKey) {
+        drawNode(existing)
+      }
     })
 
     nodeVisuals.forEach((visual, id) => {
@@ -623,7 +657,7 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
 
     edgeLayer.clear()
 
-    if (currentSnapshot) {
+    if (currentSnapshot && currentSnapshot.edges.length <= EDGE_RENDER_THRESHOLD) {
       currentSnapshot.edges.forEach((edge: LayoutEdge) => {
         const source = nodeVisuals.get(edge.sourceId)
         const target = nodeVisuals.get(edge.targetId)

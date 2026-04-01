@@ -21,6 +21,8 @@ const DEFAULT_LAYOUT_SETTINGS = {
 type LayoutListener = (snapshot: LayoutSnapshot) => void
 type FitListener = () => void
 
+export type LayoutSolverMode = 'cola' | 'cola-lite' | 'seed'
+
 interface VisibleNodeState {
   id: string
   node: GraphNodeRecord
@@ -108,6 +110,7 @@ export interface LayoutSnapshot {
   bounds: LayoutBounds
   maxDepth: number
   maxSupportedDepth: number
+  solverMode: LayoutSolverMode
   edgeSettings: EdgeLengthSettings
   layoutSettings: LayoutSettings
 }
@@ -180,6 +183,7 @@ export class GraphLayoutEngine {
   private runVersion = 0
   private viewportWidth = 1600
   private viewportHeight = 900
+  private solverMode: LayoutSolverMode = 'cola'
   private edgeSettings: EdgeLengthSettings = { ...DEFAULT_EDGE_SETTINGS }
   private layoutSettings: LayoutSettings = { ...DEFAULT_LAYOUT_SETTINGS }
 
@@ -220,6 +224,19 @@ export class GraphLayoutEngine {
 
   getSnapshot() {
     return this.lastSnapshot
+  }
+
+  getSolverMode() {
+    return this.solverMode
+  }
+
+  updateSolverMode(nextMode: LayoutSolverMode) {
+    if (nextMode === this.solverMode) {
+      return
+    }
+
+    this.solverMode = nextMode
+    this.relayout(this.store.getSnapshot())
   }
 
   getEdgeSettings() {
@@ -403,12 +420,16 @@ export class GraphLayoutEngine {
       } satisfies ColaLink
     })
 
-    if (colaNodes.length === 1) {
+    const denseLayout = this.solverMode === 'cola-lite'
+    const seedOnlyLayout = this.solverMode === 'seed'
+
+    if (colaNodes.length === 1 || seedOnlyLayout) {
       this.publishSnapshot(layoutVersion, colaNodes, visibleStates, edges, storeSnapshot)
       return
     }
 
     let frameId = 0
+    let tickPublishCount = 0
 
     const layout = adaptor({
       kick: () => {
@@ -436,7 +457,18 @@ export class GraphLayoutEngine {
       this.publishSnapshot(layoutVersion, colaNodes, visibleStates, edges, storeSnapshot)
     }
 
-    layout.on(EventType.tick, publish)
+    layout.on(EventType.tick, () => {
+      if (!denseLayout) {
+        publish()
+        return
+      }
+
+      tickPublishCount += 1
+
+      if (tickPublishCount % 3 === 0) {
+        publish()
+      }
+    })
     layout.on(EventType.end, publish)
     layout
       .nodes(colaNodes)
@@ -447,9 +479,16 @@ export class GraphLayoutEngine {
         Math.max(this.viewportWidth * 1.6, this.estimateCanvasWidth(visibleStates)),
         Math.max(this.viewportHeight * 1.6, this.estimateCanvasHeight(visibleStates)),
       ])
-      .convergenceThreshold(0.14)
+      .convergenceThreshold(denseLayout ? 0.34 : 0.14)
       .linkDistance((link) => link.length)
-      .start(24, 20, 28, 0, true, false)
+      .start(
+        denseLayout ? 10 : 24,
+        denseLayout ? 8 : 20,
+        denseLayout ? 12 : 28,
+        0,
+        true,
+        false,
+      )
 
     publish()
 
@@ -687,6 +726,7 @@ export class GraphLayoutEngine {
       bounds,
       maxDepth: storeSnapshot.maxDepth,
       maxSupportedDepth: this.graph.maxDepth,
+      solverMode: this.solverMode,
       edgeSettings: { ...this.edgeSettings },
       layoutSettings: { ...this.layoutSettings },
     }
