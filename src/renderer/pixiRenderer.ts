@@ -408,8 +408,6 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
       .fill({ color: 0x05070a, alpha: 0.42 })
       .rect(width - Math.max(260, width * 0.18), 0, Math.max(260, width * 0.18), height)
       .fill({ color: 0x06090d, alpha: 0.36 })
-      .roundRect(18, 18, width - 36, height - 36, 28)
-      .stroke({ color: 0x1b222d, width: 1, alpha: 0.42 })
       .moveTo(32, 96)
       .lineTo(width - 32, 96)
       .stroke({ color: 0xffffff, width: 1, alpha: 0.025 })
