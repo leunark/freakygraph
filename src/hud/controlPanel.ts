@@ -438,11 +438,15 @@ interface SelectOptions<T extends string> {
   onChange: (value: T) => void
 }
 
+interface ActiveHudSelect {
+  close: () => void
+}
+
 class HudSelect<T extends string> {
   readonly container = new Container()
   readonly height = SLIDER_HEIGHT
 
-  private static activeSelect: HudSelect<string> | null = null
+  private static activeSelect: ActiveHudSelect | null = null
   private readonly shell = new Graphics()
   private readonly field = new Graphics()
   private readonly menu = new Container()
@@ -513,7 +517,7 @@ class HudSelect<T extends string> {
       HudSelect.activeSelect.close()
     }
 
-    HudSelect.activeSelect = this as unknown as HudSelect<string>
+    HudSelect.activeSelect = this
     this.open = true
     this.redraw()
   }
