@@ -1,4 +1,5 @@
 import { type GraphNodeRecord } from '../data/exampleGraph'
+import { type GraphDataset } from '../data/exampleGraph'
 import { GraphStore, type GraphStoreSnapshot } from '../store/graphStore'
 
 const NODE_RADIUS = 30
@@ -51,6 +52,33 @@ interface ChildOrbitLayout {
 interface FamilyLayout {
   rootId: string
   nodes: PositionedNode[]
+}
+
+interface FamilyPlacement {
+  centerX: number
+  centerY: number
+  width: number
+  height: number
+}
+
+interface FamilyMetric {
+  family: FamilyLayout
+  bounds: LayoutBounds
+  index: number
+  previousPlacement?: FamilyPlacement
+  desiredCenterX: number
+  desiredCenterY: number
+  sizeDelta: number
+}
+
+interface PlacedFamilyRect {
+  rootId: string
+  centerX: number
+  centerY: number
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
 }
 
 export interface LayoutNode {
@@ -125,8 +153,10 @@ export class GraphLayoutEngine {
   private readonly store: GraphStore
   private readonly listeners = new Set<LayoutListener>()
   private readonly fitListeners = new Set<FitListener>()
+  private readonly familyPlacementCache = new Map<string, FamilyPlacement>()
   private unsubscribeFromStore: (() => void) | null = null
   private lastSnapshot: LayoutSnapshot | null = null
+  private lastGraphRef: GraphDataset | null = null
   private version = 0
   private viewportWidth = 1600
   private viewportHeight = 900
@@ -134,6 +164,7 @@ export class GraphLayoutEngine {
 
   constructor(store: GraphStore) {
     this.store = store
+    this.lastGraphRef = store.graph
     this.unsubscribeFromStore = this.store.subscribe((snapshot) => {
       this.relayout(snapshot)
     })
@@ -179,11 +210,17 @@ export class GraphLayoutEngine {
   destroy() {
     this.unsubscribeFromStore?.()
     this.unsubscribeFromStore = null
+    this.familyPlacementCache.clear()
     this.listeners.clear()
     this.fitListeners.clear()
   }
 
   private relayout(storeSnapshot: GraphStoreSnapshot) {
+    if (this.graph !== this.lastGraphRef) {
+      this.lastGraphRef = this.graph
+      this.familyPlacementCache.clear()
+    }
+
     const visibleStates = this.buildVisibleState(storeSnapshot)
 
     if (visibleStates.size === 0) {
@@ -439,94 +476,252 @@ export class GraphLayoutEngine {
     return bounds
   }
 
+  private getFallbackFamilyCenters(
+    familyMetrics: FamilyMetric[],
+    gap: number,
+  ) {
+    const fallbackCenters = new Map<string, { x: number; y: number }>()
+    const count = familyMetrics.length
+
+    if (count === 0) {
+      return fallbackCenters
+    }
+
+    const aspectRatio = clamp(this.viewportWidth / Math.max(1, this.viewportHeight), 0.72, 1.9)
+    const columns = Math.max(1, Math.ceil(Math.sqrt(count * aspectRatio)))
+    const rows = Math.max(1, Math.ceil(count / columns))
+    const cellWidth = Math.max(...familyMetrics.map((metric) => metric.bounds.width)) + gap
+    const cellHeight = Math.max(...familyMetrics.map((metric) => metric.bounds.height)) + gap
+    const totalWidth = columns * cellWidth
+    const totalHeight = rows * cellHeight
+
+    familyMetrics.forEach((metric, index) => {
+      const column = index % columns
+      const row = Math.floor(index / columns)
+      const x = -totalWidth / 2 + column * cellWidth + cellWidth / 2
+      const y = -totalHeight / 2 + row * cellHeight + cellHeight / 2
+
+      fallbackCenters.set(metric.family.rootId, { x, y })
+    })
+
+    return fallbackCenters
+  }
+
+  private createPlacedFamilyRect(
+    rootId: string,
+    bounds: LayoutBounds,
+    centerX: number,
+    centerY: number,
+  ): PlacedFamilyRect {
+    return {
+      rootId,
+      centerX,
+      centerY,
+      minX: centerX - bounds.width / 2,
+      minY: centerY - bounds.height / 2,
+      maxX: centerX + bounds.width / 2,
+      maxY: centerY + bounds.height / 2,
+    }
+  }
+
+  private overlapsPlacedFamilies(
+    candidate: PlacedFamilyRect,
+    placedFamilies: PlacedFamilyRect[],
+    gap: number,
+  ) {
+    const padding = gap / 2
+
+    return placedFamilies.some((placedFamily) => {
+      return !(
+        candidate.maxX + padding <= placedFamily.minX - padding ||
+        candidate.minX - padding >= placedFamily.maxX + padding ||
+        candidate.maxY + padding <= placedFamily.minY - padding ||
+        candidate.minY - padding >= placedFamily.maxY + padding
+      )
+    })
+  }
+
+  private findStablePlacement(
+    metric: FamilyMetric,
+    placedFamilies: PlacedFamilyRect[],
+    gap: number,
+  ): PlacedFamilyRect | null {
+    const desired = this.createPlacedFamilyRect(
+      metric.family.rootId,
+      metric.bounds,
+      metric.desiredCenterX,
+      metric.desiredCenterY,
+    )
+
+    if (!this.overlapsPlacedFamilies(desired, placedFamilies, gap)) {
+      return desired
+    }
+
+    const step = Math.max(24, gap * 0.35)
+    const maxRing = 48
+
+    for (let ring = 1; ring <= maxRing; ring += 1) {
+      let bestCandidate: { score: number; rect: PlacedFamilyRect } | null = null
+
+      for (let offsetX = -ring; offsetX <= ring; offsetX += 1) {
+        for (let offsetY = -ring; offsetY <= ring; offsetY += 1) {
+          const onPerimeter =
+            Math.abs(offsetX) === ring || Math.abs(offsetY) === ring
+
+          if (!onPerimeter) {
+            continue
+          }
+
+          const centerX = metric.desiredCenterX + offsetX * step
+          const centerY = metric.desiredCenterY + offsetY * step
+          const candidate = this.createPlacedFamilyRect(
+            metric.family.rootId,
+            metric.bounds,
+            centerX,
+            centerY,
+          )
+
+          if (this.overlapsPlacedFamilies(candidate, placedFamilies, gap)) {
+            continue
+          }
+
+          const deltaX = centerX - metric.desiredCenterX
+          const deltaY = centerY - metric.desiredCenterY
+          const score = deltaX * deltaX + deltaY * deltaY * 1.08
+
+          if (!bestCandidate || score < bestCandidate.score) {
+            bestCandidate = {
+              score,
+              rect: candidate,
+            }
+          }
+        }
+      }
+
+      if (bestCandidate) {
+        return bestCandidate.rect
+      }
+    }
+
+    return null
+  }
+
   private packFamilies(
     families: FamilyLayout[],
     visibleStates: Map<string, VisibleNodeState>,
   ) {
     const gap = this.layoutSettings.rootGap + COLLISION_PADDING * 2
-    const familyMetrics = families.map((family) => ({
+    const familyMetrics: FamilyMetric[] = families.map((family, index) => ({
       family,
       bounds: this.measureBounds(family.nodes, visibleStates),
+      index,
+      previousPlacement: this.familyPlacementCache.get(family.rootId),
+      desiredCenterX: 0,
+      desiredCenterY: 0,
+      sizeDelta: 0,
     }))
+    const fallbackCenters = this.getFallbackFamilyCenters(familyMetrics, gap)
 
-    const totalArea = familyMetrics.reduce(
-      (sum, metric) => sum + metric.bounds.width * metric.bounds.height,
-      0,
-    )
-    const aspectRatio = clamp(this.viewportWidth / Math.max(1, this.viewportHeight), 0.72, 1.9)
-    const targetRowWidth = Math.max(
-      ...familyMetrics.map((metric) => metric.bounds.width),
-      Math.sqrt(Math.max(totalArea, 1) * aspectRatio),
-    )
-    const rows: Array<{
-      metrics: typeof familyMetrics
-      width: number
-      height: number
-    }> = []
-    let currentRow: typeof familyMetrics = []
-    let currentRowWidth = 0
-    let currentRowHeight = 0
+    familyMetrics.forEach((metric) => {
+      const fallbackCenter = fallbackCenters.get(metric.family.rootId) ?? { x: 0, y: 0 }
 
-    const flushRow = () => {
-      if (currentRow.length === 0) {
+      metric.desiredCenterX = metric.previousPlacement?.centerX ?? fallbackCenter.x
+      metric.desiredCenterY = metric.previousPlacement?.centerY ?? fallbackCenter.y
+      metric.sizeDelta = metric.previousPlacement
+        ? Math.abs(metric.bounds.width - metric.previousPlacement.width) +
+          Math.abs(metric.bounds.height - metric.previousPlacement.height)
+        : 0
+    })
+
+    const placementOrder = [...familyMetrics].sort((left, right) => {
+      if (right.sizeDelta !== left.sizeDelta) {
+        return right.sizeDelta - left.sizeDelta
+      }
+
+      return left.index - right.index
+    })
+
+    const placedFamilies: PlacedFamilyRect[] = []
+    let needsFallbackGrid = false
+
+    placementOrder.forEach((metric) => {
+      if (needsFallbackGrid) {
         return
       }
 
-      rows.push({
-        metrics: currentRow,
-        width: currentRowWidth,
-        height: currentRowHeight,
-      })
-      currentRow = []
-      currentRowWidth = 0
-      currentRowHeight = 0
-    }
+      const placedFamily = this.findStablePlacement(metric, placedFamilies, gap)
 
-    familyMetrics.forEach((metric) => {
-      const nextWidth =
-        currentRow.length === 0
-          ? metric.bounds.width
-          : currentRowWidth + gap + metric.bounds.width
-
-      if (currentRow.length > 0 && nextWidth > targetRowWidth) {
-        flushRow()
+      if (!placedFamily) {
+        needsFallbackGrid = true
+        return
       }
 
-      currentRow.push(metric)
-      currentRowWidth =
-        currentRow.length === 1
-          ? metric.bounds.width
-          : currentRowWidth + gap + metric.bounds.width
-      currentRowHeight = Math.max(currentRowHeight, metric.bounds.height)
+      placedFamilies.push(placedFamily)
     })
 
-    flushRow()
+    if (needsFallbackGrid) {
+      placedFamilies.length = 0
 
-    const totalHeight =
-      rows.reduce((sum, row) => sum + row.height, 0) + Math.max(0, rows.length - 1) * gap
-    let cursorY = -totalHeight / 2
+      familyMetrics.forEach((metric) => {
+        const fallbackCenter = fallbackCenters.get(metric.family.rootId) ?? { x: 0, y: 0 }
+
+        placedFamilies.push(
+          this.createPlacedFamilyRect(
+            metric.family.rootId,
+            metric.bounds,
+            fallbackCenter.x,
+            fallbackCenter.y,
+          ),
+        )
+      })
+    }
+
+    const placedByRootId = new Map(
+      placedFamilies.map((placedFamily) => [placedFamily.rootId, placedFamily] as const),
+    )
+    const activeRootIds = new Set(families.map((family) => family.rootId))
+
+    this.familyPlacementCache.forEach((_, rootId) => {
+      if (!activeRootIds.has(rootId)) {
+        this.familyPlacementCache.delete(rootId)
+      }
+    })
+
+    families.forEach((family) => {
+      const placedFamily = placedByRootId.get(family.rootId)
+      const bounds = familyMetrics.find((metric) => metric.family.rootId === family.rootId)?.bounds
+
+      if (!placedFamily || !bounds) {
+        return
+      }
+
+      this.familyPlacementCache.set(family.rootId, {
+        centerX: placedFamily.centerX,
+        centerY: placedFamily.centerY,
+        width: bounds.width,
+        height: bounds.height,
+      })
+    })
+
     const packedNodes: PositionedNode[] = []
 
-    rows.forEach((row) => {
-      let cursorX = -row.width / 2
+    familyMetrics.forEach((metric) => {
+      const placedFamily = placedByRootId.get(metric.family.rootId)
 
-      row.metrics.forEach((metric) => {
-        const offsetX = cursorX - metric.bounds.minX
-        const offsetY =
-          cursorY + (row.height - metric.bounds.height) / 2 - metric.bounds.minY
+      if (!placedFamily) {
+        return
+      }
 
-        metric.family.nodes.forEach((node) => {
-          packedNodes.push({
-            ...node,
-            x: node.x + offsetX,
-            y: node.y + offsetY,
-          })
+      const offsetX = placedFamily.centerX - (metric.bounds.minX + metric.bounds.width / 2)
+      const offsetY = placedFamily.centerY - (metric.bounds.minY + metric.bounds.height / 2)
+
+      metric.family.nodes.forEach((node) => {
+        packedNodes.push({
+          ...node,
+          x: node.x + offsetX,
+          y: node.y + offsetY,
         })
-
-        cursorX += metric.bounds.width + gap
       })
-
-      cursorY += row.height + gap
     })
 
     return packedNodes
