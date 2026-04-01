@@ -360,6 +360,10 @@ export class GraphLayoutEngine {
     this.viewportHeight = Math.max(1, height)
   }
 
+  refreshLayout() {
+    this.relayout(this.store.getSnapshot())
+  }
+
   destroy() {
     this.activeLayout?.stop()
     this.activeLayout = null

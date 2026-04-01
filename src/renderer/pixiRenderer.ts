@@ -289,8 +289,13 @@ function fitSceneToSnapshot(scene: Container, snapshot: LayoutSnapshot, width: n
     return
   }
 
-  const horizontalPadding = clamp(width * 0.035, 12, 44)
-  const verticalPadding = clamp(height * 0.07, 18, 72)
+  const landscapeMobile = width > height && height <= 560
+  const horizontalPadding = landscapeMobile
+    ? clamp(width * 0.008, 4, 10)
+    : clamp(width * 0.018, 8, 20)
+  const verticalPadding = landscapeMobile
+    ? clamp(height * 0.02, 6, 12)
+    : clamp(height * 0.04, 10, 28)
   const availableWidth = Math.max(1, width - horizontalPadding * 2)
   const availableHeight = Math.max(1, height - verticalPadding * 2)
   const scale = clamp(
@@ -391,6 +396,7 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
   let lastViewportHeight = 0
   let viewportSyncFrame = 0
   let viewportSyncTimeout = 0
+  let refitAfterViewportRefresh = false
 
   sceneContainer.addChild(edgeLayer, nodeLayer)
   backgroundLayer.addChild(backdrop)
@@ -428,20 +434,15 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
       .clear()
       .rect(0, 0, width, height)
       .fill({ color: 0x020304, alpha: 1 })
-      .rect(0, 0, width, Math.max(180, height * 0.22))
-      .fill({ color: 0x06080b, alpha: 0.9 })
-      .rect(0, height - Math.max(220, height * 0.26), width, Math.max(220, height * 0.26))
-      .fill({ color: 0x05070a, alpha: 0.82 })
-      .rect(0, 0, Math.max(220, width * 0.16), height)
-      .fill({ color: 0x05070a, alpha: 0.42 })
-      .rect(width - Math.max(260, width * 0.18), 0, Math.max(260, width * 0.18), height)
-      .fill({ color: 0x06090d, alpha: 0.36 })
 
     app.stage.hitArea = new Rectangle(0, 0, width, height)
     layoutEngine.setViewportSize(width, height)
     clearInteractions()
 
-    if (currentSnapshot && majorViewportChange) {
+    if (majorViewportChange) {
+      refitAfterViewportRefresh = true
+      layoutEngine.refreshLayout()
+    } else if (currentSnapshot) {
       fitSceneToSnapshot(sceneContainer, currentSnapshot, width, height)
     }
 
@@ -733,6 +734,11 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
       visual.exitOriginX = visual.displayX
       visual.exitOriginY = visual.displayY
     })
+
+    if (refitAfterViewportRefresh) {
+      refitAfterViewportRefresh = false
+      fitSceneToSnapshot(sceneContainer, snapshot, app.screen.width, app.screen.height)
+    }
 
     if (!didAutoFit && currentSnapshot) {
       didAutoFit = true
