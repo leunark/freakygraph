@@ -24,6 +24,7 @@ import {
 import { createGraphStore } from '../store/graphStore'
 
 const CAMERA_MIN_SCALE = 0.012
+const CAMERA_MAX_SCALE = 6
 const ENTER_EXIT_DURATION = 400
 const NODE_SPRING_STRENGTH = 0.12
 const NODE_SPRING_DAMPING = 0.74
@@ -242,6 +243,36 @@ function applyCameraZoom(scene: Container, clientX: number, clientY: number, nex
   scene.position.set(clientX - worldX * nextScale, clientY - worldY * nextScale)
 }
 
+function getTrackedPinch(activePointers: Map<number, Point>) {
+  const trackedPoints = Array.from(activePointers.values())
+
+  if (trackedPoints.length < 2) {
+    return null
+  }
+
+  const [first, second] = trackedPoints
+  const centerX = (first.x + second.x) / 2
+  const centerY = (first.y + second.y) / 2
+
+  return {
+    centerX,
+    centerY,
+    distance: Math.hypot(second.x - first.x, second.y - first.y),
+  }
+}
+
+function normalizeWheelDelta(event: WheelEvent) {
+  if (event.deltaMode === 1) {
+    return event.deltaY * 16
+  }
+
+  if (event.deltaMode === 2) {
+    return event.deltaY * window.innerHeight
+  }
+
+  return event.deltaY
+}
+
 function screenToWorld(scene: Container, clientX: number, clientY: number) {
   const scale = scene.scale.x
 
@@ -348,10 +379,13 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
   let isPanning = false
   let pressedNodeId: string | null = null
   let dragNodeId: string | null = null
+  let pinchStartDistance = 0
+  let pinchStartScale = 1
   let nodeDragOffset = new Point()
   let pointerDownClient = new Point()
   let panStartScene = new Point()
   let panStartPointer = new Point()
+  const activePointers = new Map<number, Point>()
 
   sceneContainer.addChild(edgeLayer, nodeLayer)
   backgroundLayer.addChild(backdrop)
@@ -390,6 +424,18 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
 
   resizeStage()
 
+  const startPinchGesture = () => {
+    const pinch = getTrackedPinch(activePointers)
+
+    if (!pinch) {
+      pinchStartDistance = 0
+      return
+    }
+
+    pinchStartDistance = Math.max(1, pinch.distance)
+    pinchStartScale = sceneContainer.scale.x
+  }
+
   const pickNodeAt = (clientX: number, clientY: number) => {
     const scale = sceneContainer.scale.x
 
@@ -413,6 +459,33 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
   }
 
   const pointerMove = (event: PointerEvent) => {
+    if (activePointers.has(event.pointerId)) {
+      activePointers.set(event.pointerId, new Point(event.clientX, event.clientY))
+    }
+
+    if (activePointers.size >= 2) {
+      const pinch = getTrackedPinch(activePointers)
+
+      if (pinch) {
+        if (pinchStartDistance <= 0) {
+          startPinchGesture()
+        }
+
+        const nextScale = clamp(
+          pinchStartScale * (pinch.distance / Math.max(1, pinchStartDistance)),
+          CAMERA_MIN_SCALE,
+          CAMERA_MAX_SCALE,
+        )
+
+        pressedNodeId = null
+        dragNodeId = null
+        isPanning = false
+        applyCameraZoom(sceneContainer, pinch.centerX, pinch.centerY, nextScale)
+      }
+
+      return
+    }
+
     const moved =
       Math.abs(event.clientX - pointerDownClient.x) > NODE_DRAG_THRESHOLD ||
       Math.abs(event.clientY - pointerDownClient.y) > NODE_DRAG_THRESHOLD
@@ -449,7 +522,25 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
     sceneContainer.position.set(panStartScene.x + deltaX, panStartScene.y + deltaY)
   }
 
-  const pointerUp = () => {
+  const pointerUp = (event: PointerEvent) => {
+    if (activePointers.has(event.pointerId)) {
+      activePointers.delete(event.pointerId)
+    }
+
+    if (activePointers.size >= 2) {
+      startPinchGesture()
+      return
+    }
+
+    pinchStartDistance = 0
+
+    if (activePointers.size > 0) {
+      pressedNodeId = null
+      dragNodeId = null
+      isPanning = false
+      return
+    }
+
     if (dragNodeId) {
       dragNodeId = null
       pressedNodeId = null
@@ -467,13 +558,23 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
 
   window.addEventListener('pointermove', pointerMove)
   window.addEventListener('pointerup', pointerUp)
+  window.addEventListener('pointercancel', pointerUp)
   window.addEventListener('resize', resizeStage)
 
   app.stage.on('pointerdown', (event) => {
     const clientX = event.global.x
     const clientY = event.global.y
+    activePointers.set(event.pointerId, new Point(clientX, clientY))
 
     pointerDownClient = new Point(clientX, clientY)
+
+    if (activePointers.size >= 2) {
+      startPinchGesture()
+      pressedNodeId = null
+      dragNodeId = null
+      isPanning = false
+      return
+    }
 
     const pickedNode = pickNodeAt(clientX, clientY)
 
@@ -499,8 +600,14 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
   const handleWheel = (event: WheelEvent) => {
     event.preventDefault()
 
-    const scaleFactor = Math.exp(-event.deltaY * 0.0015)
-    const nextScale = Math.max(CAMERA_MIN_SCALE, sceneContainer.scale.x * scaleFactor)
+    const deltaY = normalizeWheelDelta(event)
+    const zoomStrength = event.ctrlKey ? 0.0044 : 0.0026
+    const scaleFactor = Math.exp(-deltaY * zoomStrength)
+    const nextScale = clamp(
+      sceneContainer.scale.x * scaleFactor,
+      CAMERA_MIN_SCALE,
+      CAMERA_MAX_SCALE,
+    )
 
     applyCameraZoom(sceneContainer, event.clientX, event.clientY, nextScale)
   }
@@ -739,6 +846,7 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
       layoutEngine.destroy()
       window.removeEventListener('pointermove', pointerMove)
       window.removeEventListener('pointerup', pointerUp)
+      window.removeEventListener('pointercancel', pointerUp)
       window.removeEventListener('resize', resizeStage)
       canvas.removeEventListener('wheel', handleWheel)
       app.destroy(undefined, { children: true })
