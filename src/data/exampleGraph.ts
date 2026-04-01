@@ -28,11 +28,11 @@ interface MutableBranch {
   children: MutableBranch[]
 }
 
-export const DEFAULT_EXAMPLE_ROOT_COUNT = 30
+export const DEFAULT_EXAMPLE_ROOT_COUNT = 4
 export const MIN_EXAMPLE_ROOT_COUNT = 1
 export const DEFAULT_EXAMPLE_DEPTH = 3
 export const MIN_EXAMPLE_DEPTH = 0
-export const DEFAULT_CHILD_MIN_COUNT = 2
+export const DEFAULT_CHILD_MIN_COUNT = 3
 export const DEFAULT_CHILD_MAX_COUNT = 5
 export const MIN_CHILD_COUNT = 0
 
