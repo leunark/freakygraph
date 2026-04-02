@@ -1184,6 +1184,13 @@ export async function initPixiRenderer(canvas: HTMLCanvasElement): Promise<PixiR
       graphStore.expandAll()
     },
     collapseAll: () => {
+      if (graphStore.getSnapshot().expanded.size === 0) {
+        return
+      }
+
+      clearInteractions()
+      hardResetPending = true
+      layoutEngine.resetFamilyPlacements()
       graphStore.collapseAll()
     },
     fitToScreen: () => {

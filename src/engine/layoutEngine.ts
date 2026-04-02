@@ -203,6 +203,10 @@ export class GraphLayoutEngine {
     this.viewportHeight = Math.max(1, height)
   }
 
+  resetFamilyPlacements() {
+    this.familyPlacementCache.clear()
+  }
+
   refreshLayout() {
     this.relayout(this.store.getSnapshot())
   }
